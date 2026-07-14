@@ -1,0 +1,2280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cuentas Críticas por Cobrar</title>
+<meta name="description" content="Sistema de gestión de cuentas críticas por cobrar: dashboard con semáforo de mora, importación desde Excel/CSV, abonos con fecha, roles y permisos.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230f2138'/%3E%3Ctext x='50' y='66' font-family='monospace' font-weight='700' font-size='42' fill='%230e7c7b' text-anchor='middle'%3ECC%3C/text%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --navy:#0f2138;
+  --navy-2:#16324f;
+  --navy-3:#1e3f63;
+  --paper:#f2f5f9;
+  --card:#ffffff;
+  --ink:#1b2733;
+  --muted:#66748a;
+  --line:#e1e6ee;
+  --accent:#0e7c7b;
+  --accent-dark:#0a5f5e;
+  --accent-light:#e3f3f2;
+  --verde:#2e7d32; --verde-bg:#e8f5e9;
+  --amarillo:#b8860b; --amarillo-bg:#fff6d9;
+  --naranja:#c15a0e; --naranja-bg:#ffe9d9;
+  --rojo:#c62828; --rojo-bg:#fdebea;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:var(--font-ui);background:var(--paper);color:var(--ink);font-size:14px;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:#cbd3e0;border-radius:6px;}
+
+/* ---------- layout ---------- */
+.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh;}
+.sidebar{background:var(--navy);color:#cdd9e6;padding:22px 16px;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px 20px 6px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:16px;}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-weight:700;color:#fff;font-size:15px;flex:none;}
+.brand-text .t1{font-weight:700;color:#fff;font-size:13.5px;line-height:1.25;}
+.brand-text .t2{font-size:11px;color:#8fa3ba;}
+nav.navlist{display:flex;flex-direction:column;gap:2px;}
+.navlink{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#b9c6d6;text-decoration:none;font-size:13.5px;cursor:pointer;border:none;background:none;text-align:left;width:100%;font-family:var(--font-ui);}
+.navlink:hover{background:rgba(255,255,255,.06);color:#fff;}
+.navlink.active{background:var(--accent);color:#fff;font-weight:600;}
+.navlink .ic{width:18px;text-align:center;font-family:var(--font-mono);font-size:12px;opacity:.85;}
+.navlink[disabled]{opacity:.35;cursor:not-allowed;pointer-events:none;}
+.nav-section-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:#6d84a0;margin:18px 8px 6px;}
+
+.main{padding:22px 30px 60px;max-width:1400px;}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap;}
+.pagehead h1{font-size:21px;margin:0 0 3px;letter-spacing:-.01em;}
+.pagehead p{margin:0;color:var(--muted);font-size:13px;}
+.session-box{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);padding:8px 12px;border-radius:10px;}
+.session-box select, .session-box input{border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-family:var(--font-ui);font-size:12.5px;background:#fff;}
+.role-pill{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 8px;border-radius:20px;}
+.role-admin{background:#f0e6ff;color:#6a2fb5;}
+.role-contable{background:var(--accent-light);color:var(--accent-dark);}
+.role-auxiliar{background:#eef1f6;color:#57657a;}
+.storage-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:6px 11px;border-radius:20px;cursor:default;}
+.storage-badge.cloud{background:var(--accent-light);color:var(--accent-dark);}
+.storage-badge.local{background:var(--amarillo-bg);color:var(--amarillo);}
+.storage-badge.memory{background:var(--rojo-bg);color:var(--rojo);}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:18px;}
+.card h2{font-size:15px;margin:0 0 14px;display:flex;align-items:center;gap:8px;}
+.card h2 .n{font-family:var(--font-mono);color:var(--accent);font-size:12px;}
+.grid{display:grid;gap:14px;}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+.grid-3{grid-template-columns:repeat(3,1fr);}
+.grid-2{grid-template-columns:1fr 1fr;}
+@media(max-width:1000px){.grid-4{grid-template-columns:repeat(2,1fr);} .grid-3{grid-template-columns:1fr 1fr;}}
+
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+.stat .label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+.stat .value{font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--navy);}
+.stat .sub{font-size:11.5px;color:var(--muted);margin-top:4px;}
+
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.b-verde{background:var(--verde-bg);color:var(--verde);}
+.b-amarillo{background:var(--amarillo-bg);color:var(--amarillo);}
+.b-naranja{background:var(--naranja-bg);color:var(--naranja);}
+.b-rojo{background:var(--rojo-bg);color:var(--rojo);}
+.dot-verde{background:var(--verde);} .dot-amarillo{background:var(--amarillo);} .dot-naranja{background:var(--naranja);} .dot-rojo{background:var(--rojo);}
+
+table{width:100%;border-collapse:collapse;font-size:12.8px;}
+th{position:sticky;top:0;background:var(--navy);color:#fff;text-align:left;padding:9px 10px;font-size:11.3px;text-transform:uppercase;letter-spacing:.03em;z-index:2;}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+tr:hover td{background:#f7fafc;}
+.tablewrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px;}
+.mono{font-family:var(--font-mono);}
+.tfoot-row td{font-weight:700;background:#eef2f7;position:sticky;bottom:0;}
+
+.btn{font-family:var(--font-ui);border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 14px;border-radius:8px;font-size:12.8px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;}
+.btn:hover{border-color:#c3ccd8;}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.btn-primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--accent-dark);}
+.btn-sm{padding:5px 10px;font-size:11.8px;border-radius:6px;}
+.btn-danger{color:var(--rojo);}
+.btn[disabled]{opacity:.4;cursor:not-allowed;}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:14px;}
+.field{display:flex;flex-direction:column;gap:4px;}
+.field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.field select, .field input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-family:var(--font-ui);font-size:12.8px;background:#fff;min-width:130px;}
+.searchbar{flex:1;min-width:220px;}
+.searchbar input{width:100%;padding:9px 12px;border-radius:8px;border:1px solid var(--line);font-size:13px;}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;}
+.tab{padding:9px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;}
+.tab.active{color:var(--accent-dark);border-bottom-color:var(--accent);}
+
+.dropzone{border:2px dashed var(--line);border-radius:12px;padding:30px;text-align:center;color:var(--muted);background:#fbfcfe;cursor:pointer;}
+.dropzone:hover{border-color:var(--accent);color:var(--accent-dark);}
+.dropzone input{display:none;}
+
+.pill-warn{background:var(--amarillo-bg);color:var(--amarillo);border-radius:6px;padding:2px 7px;font-size:10.8px;font-weight:700;}
+.pill-error{background:var(--rojo-bg);color:var(--rojo);border-radius:6px;padding:2px 7px;font-size:10.8px;font-weight:700;}
+.pill-ok{background:var(--verde-bg);color:var(--verde);border-radius:6px;padding:2px 7px;font-size:10.8px;font-weight:700;}
+
+.modal-bg{position:fixed;inset:0;background:rgba(15,33,56,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;}
+.modal{background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:24px;}
+.modal h3{margin:0 0 4px;font-size:16px;}
+.modal .close{position:absolute;}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;}
+.formgrid .full{grid-column:1/-1;}
+.formgrid label{font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;}
+.formgrid select, .formgrid input, .formgrid textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font-ui);font-size:13px;}
+.formgrid textarea{resize:vertical;min-height:60px;}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
+
+.timeline{border-left:2px solid var(--line);margin-left:8px;padding-left:20px;}
+.tl-item{position:relative;padding-bottom:20px;}
+.tl-item::before{content:'';position:absolute;left:-26px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--accent);}
+.tl-date{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);}
+.tl-body{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:4px;}
+
+.chart-bars{display:flex;align-items:flex-end;gap:14px;height:160px;padding-top:10px;}
+.chart-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px;}
+.chart-bar{width:100%;border-radius:6px 6px 0 0;min-height:4px;}
+.chart-label{font-size:11px;color:var(--muted);text-align:center;}
+.chart-val{font-family:var(--font-mono);font-size:12px;font-weight:700;}
+
+.empty{text-align:center;padding:40px 20px;color:var(--muted);}
+.empty .big{font-size:32px;margin-bottom:10px;}
+.note{background:var(--accent-light);border:1px solid #bfe3e1;color:var(--accent-dark);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:16px;}
+.alertbox{background:var(--rojo-bg);border:1px solid #f3c6c3;color:#8f231f;border-radius:10px;padding:10px 14px;font-size:12.8px;margin-bottom:14px;}
+.linklike{color:var(--accent-dark);cursor:pointer;font-weight:600;text-decoration:underline;}
+.small{font-size:11.5px;color:var(--muted);}
+.catlist{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.cattag{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:5px 12px;font-size:12px;display:flex;align-items:center;gap:8px;}
+.cattag button{border:none;background:none;color:var(--rojo);cursor:pointer;font-weight:700;font-size:13px;}
+.addrow{display:flex;gap:8px;margin-top:12px;}
+.addrow input{flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;}
+hr.sep{border:none;border-top:1px solid var(--line);margin:18px 0;}
+
+/* ---------- login ---------- */
+#loginScreen{position:fixed;inset:0;background:linear-gradient(160deg,var(--navy),var(--navy-3));display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;}
+.login-card{background:#fff;border-radius:16px;padding:34px 34px 28px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+.login-brand .brand-mark{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-weight:700;color:#fff;font-size:16px;}
+.login-brand div div:first-child{font-weight:700;font-size:15px;color:var(--navy);}
+.login-brand div div:last-child{font-size:11.5px;color:var(--muted);}
+.login-card h2{font-size:17px;margin:0 0 4px;}
+.login-card p.sub{font-size:12.5px;color:var(--muted);margin:0 0 20px;}
+.login-field{margin-bottom:14px;}
+.login-field label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:5px;}
+.login-field input, .login-field select{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:var(--font-ui);font-size:13.5px;}
+.login-error{background:var(--rojo-bg);color:var(--rojo);border-radius:8px;padding:8px 12px;font-size:12.3px;margin-bottom:14px;}
+.login-ok{background:var(--verde-bg);color:var(--verde);border-radius:8px;padding:8px 12px;font-size:12.3px;margin-bottom:14px;}
+.login-actions{display:flex;flex-direction:column;gap:10px;margin-top:6px;}
+.login-actions .btn{width:100%;justify-content:center;padding:10px;font-size:13px;}
+.login-link{text-align:center;font-size:12.3px;color:var(--accent-dark);cursor:pointer;font-weight:600;margin-top:6px;}
+.login-back{font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:14px;display:inline-block;}
+.login-note{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:11.5px;color:var(--muted);margin-top:16px;}
+</style>
+</head>
+<body>
+<div id="loginScreen"></div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">CC</div>
+      <div class="brand-text">
+        <div class="t1">Cuentas Críticas</div>
+        <div class="t2">Gestión de Cobros — Dirección</div>
+      </div>
+    </div>
+    <nav class="navlist" id="navlist"></nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="pagehead">
+        <h1 id="pageTitle">Dashboard</h1>
+        <p id="pageSub">Panel general de cuentas críticas</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span id="storageBadge" class="storage-badge" title="Dónde se están guardando tus datos"></span>
+        <div class="session-box">
+          <span class="small">Sesión:</span>
+          <span id="sessionUserLabel" style="font-weight:600;font-size:12.8px;">—</span>
+          <span id="rolePill" class="role-pill role-admin">Administrador</span>
+          <button class="btn btn-sm" id="logoutBtn">Cerrar sesión</button>
+        </div>
+      </div>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+/* =========================================================================
+   ESTADO Y PERSISTENCIA
+   ========================================================================= */
+const DB = {
+  familias: [], estudiantes: [], actividades: [], estudianteActividades: [],
+  cuentas: [], seguimientos: [], usuarios: [], abonos: [], auditoria: [],
+  catalogos: {
+    niveles: ["Nivel Inicial","Nivel Primario","Nivel Secundario"],
+    grados: ["1er Grado A","1er Grado B","2do Grado A","3er Grado A","1er Año A","1er Año B","2do Año A"],
+    actividades: ["Fútbol","Música","Robótica","Transporte","Natación"],
+    estadosCuenta: ["Pendiente","Contactado","Compromiso de pago","Pago parcial","Regularizado","Sin respuesta"],
+    mediosContacto: ["Llamada","WhatsApp","Correo","Reunión","Visita"],
+    resultadosGestion: ["No respondió","Promesa de pago","Pagó","Reprogramó","Número incorrecto","Pendiente"],
+    responsables: ["Ana Gómez","Luis Familia","Dirección"]
+  }
+};
+let STORAGE_OK = true;
+// 'checking' -> 'cloud' (Claude.ai) -> 'indexeddb' -> 'local' (localStorage) -> 'memory'
+let STORAGE_MODE = 'checking';
+let STORAGE_DIAG = { protocolo:'', supabaseIntentado:false, supabaseFunciona:false, cloudIntentado:false, cloudFunciona:false, idbIntentado:false, idbFunciona:false, localIntentado:false, localFunciona:false, detalle:'' };
+let MEMORY_STORE = {}; // último recurso: sobrevive mientras la pestaña esté abierta, se pierde al recargar
+let SUPABASE_URL = null;
+let SUPABASE_ANON_KEY = null;
+
+async function cargarConfigSupabase(){
+  let cfg = null;
+  try{ cfg = await idbGet('ccc:supabase_config'); }catch(e){ /* IndexedDB puede no estar lista aún */ }
+  if (!cfg){
+    try{ const raw = localStorage.getItem('ccc_local:ccc:supabase_config'); if (raw) cfg = JSON.parse(raw); }catch(e){}
+  }
+  if (cfg && cfg.url && cfg.key){ SUPABASE_URL = cfg.url; SUPABASE_ANON_KEY = cfg.key; }
+}
+// Acepta el Project URL tal cual lo copien, incluso si pegaron de más (ej. ".../rest/v1/" al final,
+// que es común porque así aparece en algunas pantallas de la documentación de Supabase).
+function normalizarSupabaseUrl(url){
+  let u = String(url||'').trim();
+  u = u.replace(/\/rest\/v1\/?$/i, '');
+  u = u.replace(/\/+$/,'');
+  return u;
+}
+async function guardarConfigSupabase(url, key){
+  const cfg = { url: normalizarSupabaseUrl(url), key: String(key||'').trim() };
+  try{ await idbSet('ccc:supabase_config', cfg); }catch(e){}
+  try{ localStorage.setItem('ccc_local:ccc:supabase_config', JSON.stringify(cfg)); }catch(e){}
+  SUPABASE_URL = cfg.url; SUPABASE_ANON_KEY = cfg.key;
+}
+async function borrarConfigSupabase(){
+  SUPABASE_URL = null; SUPABASE_ANON_KEY = null;
+  try{ await idbSet('ccc:supabase_config', null); }catch(e){}
+  try{ localStorage.removeItem('ccc_local:ccc:supabase_config'); }catch(e){}
+}
+
+/* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
+   para no depender de un CDN fuera de lo permitido en este entorno. ---------- */
+async function supabaseFetch(path, options){
+  options = options || {};
+  return fetch(SUPABASE_URL + path, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: 'Bearer ' + SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json',
+      ...(options.headers||{})
+    }
+  });
+}
+async function supabaseProbar(url, key){
+  const base = normalizarSupabaseUrl(url);
+  if (!base || !key) return { ok:false, error:'Complete el Project URL y la anon key.' };
+  try{
+    const res = await fetch(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
+    if (res.status === 200) return { ok:true };
+    if (res.status === 404 || res.status === 400) return { ok:false, error:'No se encontró la tabla "kv_store". Verifique que ejecutó el script SQL en su proyecto de Supabase (ver ARQUITECTURA_Y_ESCALABILIDAD.md).' };
+    if (res.status === 401 || res.status === 403) return { ok:false, error:'Credenciales rechazadas (código '+res.status+'). Verifique el Project URL y la anon key.' };
+    return { ok:false, error:'Respuesta inesperada del servidor (código ' + res.status + ').' };
+  }catch(e){
+    return { ok:false, error:'No se pudo conectar: ' + (e && e.message || e) };
+  }
+}
+async function supabaseGet(key){
+  const res = await supabaseFetch('/rest/v1/kv_store?key=eq.' + encodeURIComponent(key) + '&select=value', { method:'GET' });
+  if (!res.ok) throw new Error('Supabase GET falló (código ' + res.status + ')');
+  const rows = await res.json();
+  return (rows && rows[0] && rows[0].value !== undefined) ? rows[0].value : null;
+}
+async function supabaseSet(key, value){
+  const res = await supabaseFetch('/rest/v1/kv_store', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
+  });
+  if (!res.ok) throw new Error('Supabase SET falló (código ' + res.status + ')');
+}
+
+// Hash simple en JS puro (sin depender de crypto.subtle, que no siempre está
+// disponible dentro del iframe de vista previa). No es criptográfico de grado
+// bancario, pero evita guardar contraseñas en texto plano y funciona en cualquier entorno.
+function hashText(text){
+  text = String(text||'').trim().toLowerCase();
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let i=0;i<text.length;i++){
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+    h2 = ((h2 * 33) ^ c) >>> 0;
+  }
+  return h1.toString(16).padStart(8,'0') + h2.toString(16).padStart(8,'0') + text.length.toString(16);
+}
+
+function cloudStorageDisponible(){
+  return typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function';
+}
+
+/* ---------- IndexedDB: almacenamiento local principal (mucha más capacidad y
+   estructura que localStorage; asíncrono; pensado para que la app crezca con los años) ---------- */
+const IDB_NAME = 'cccDB';
+const IDB_STORE = 'kv';
+let _idbInstance = null;
+function idbOpen(){
+  return new Promise((resolve, reject)=>{
+    if (!('indexedDB' in window) || !window.indexedDB) { reject(new Error('IndexedDB no disponible en este navegador')); return; }
+    let req;
+    try{ req = window.indexedDB.open(IDB_NAME, 1); }catch(e){ reject(e); return; }
+    req.onupgradeneeded = (e)=>{
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error || new Error('No se pudo abrir IndexedDB'));
+    req.onblocked = ()=> reject(new Error('Apertura de IndexedDB bloqueada'));
+  });
+}
+async function idbGetInstance(){
+  if (_idbInstance) return _idbInstance;
+  _idbInstance = await idbOpen();
+  return _idbInstance;
+}
+function idbGet(key){
+  return idbGetInstance().then(db => new Promise((resolve, reject)=>{
+    try{
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.get(key);
+      req.onsuccess = ()=> resolve(req.result === undefined ? null : req.result);
+      req.onerror = ()=> reject(req.error);
+    }catch(e){ reject(e); }
+  }));
+}
+function idbSet(key, value){
+  return idbGetInstance().then(db => new Promise((resolve, reject)=>{
+    try{
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.put(value, key);
+      req.onsuccess = ()=> resolve(true);
+      req.onerror = ()=> reject(req.error);
+    }catch(e){ reject(e); }
+  }));
+}
+async function migrarLocalStorageAIndexedDB(){
+  try{
+    const marker = await idbGet('ccc:__migrated_from_localstorage__');
+    if (marker) return;
+    const prefix = 'ccc_local:';
+    for (let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if (k && k.indexOf(prefix)===0){
+        const realKey = k.slice(prefix.length);
+        const raw = localStorage.getItem(k);
+        if (raw !== null){
+          try{ await idbSet(realKey, JSON.parse(raw)); }catch(e){ /* fila corrupta, se ignora */ }
+        }
+      }
+    }
+    await idbSet('ccc:__migrated_from_localstorage__', true);
+  }catch(e){ /* la migración es un plus, no debe romper el arranque */ }
+}
+
+// Prueba REAL de guardado en cada nivel: escribe un valor, lo vuelve a leer, y confirma
+// que coincide. No basta con que la llamada no arroje error — en algunos navegadores
+// (sobre todo con el archivo abierto como file://) el storage existe pero no persiste de verdad.
+async function verificarAlmacenamiento(){
+  STORAGE_DIAG.protocolo = (typeof location !== 'undefined' && location.protocol) ? location.protocol : 'desconocido';
+  const testKey = 'ccc:__test__';
+  const testVal = { t: Date.now(), r: Math.random().toString(36) };
+
+  if (SUPABASE_URL && SUPABASE_ANON_KEY){
+    STORAGE_DIAG.supabaseIntentado = true;
+    try{
+      await supabaseSet(testKey, testVal);
+      const back = await supabaseGet(testKey);
+      const ok = !!(back && back.r === testVal.r);
+      STORAGE_DIAG.supabaseFunciona = ok;
+      if (ok){ STORAGE_MODE = 'supabase'; return; }
+    }catch(e){ STORAGE_DIAG.detalle = 'Supabase: ' + (e && e.message || e); }
+  }
+
+  if (cloudStorageDisponible()){
+    STORAGE_DIAG.cloudIntentado = true;
+    try{
+      await window.storage.set(testKey, JSON.stringify(testVal), true);
+      const r = await window.storage.get(testKey, true);
+      const ok = !!(r && r.value && JSON.parse(r.value).r === testVal.r);
+      STORAGE_DIAG.cloudFunciona = ok;
+      if (ok){ STORAGE_MODE = 'cloud'; return; }
+    }catch(e){ STORAGE_DIAG.detalle = 'Nube: ' + (e && e.message || e); }
+  }
+
+  STORAGE_DIAG.idbIntentado = true;
+  try{
+    await idbSet(testKey, testVal);
+    const back = await idbGet(testKey);
+    const ok = !!(back && back.r === testVal.r);
+    STORAGE_DIAG.idbFunciona = ok;
+    if (ok){
+      STORAGE_MODE = 'indexeddb';
+      await migrarLocalStorageAIndexedDB();
+      return;
+    }
+  }catch(e){ STORAGE_DIAG.detalle = (STORAGE_DIAG.detalle?STORAGE_DIAG.detalle+' | ':'') + 'IndexedDB: ' + (e && e.message || e); }
+
+  STORAGE_DIAG.localIntentado = true;
+  try{
+    localStorage.setItem('ccc_local:'+testKey, JSON.stringify(testVal));
+    const raw = localStorage.getItem('ccc_local:'+testKey);
+    const ok = !!(raw && JSON.parse(raw).r === testVal.r);
+    localStorage.removeItem('ccc_local:'+testKey);
+    STORAGE_DIAG.localFunciona = ok;
+    if (ok){ STORAGE_MODE = 'local'; return; }
+  }catch(e){ STORAGE_DIAG.detalle = (STORAGE_DIAG.detalle?STORAGE_DIAG.detalle+' | ':'') + 'Local: ' + (e && e.message || e); }
+
+  STORAGE_MODE = 'memory';
+}
+
+async function dbGet(key, fallback){
+  if (STORAGE_MODE === 'supabase'){
+    try{
+      const v = await supabaseGet(key);
+      if (v !== null && v !== undefined) return v;
+      return fallback;
+    }catch(e){ /* seguimos abajo: probamos el espejo local */ }
+  }
+  if (STORAGE_MODE === 'cloud'){
+    try{
+      const r = await window.storage.get(key, true);
+      return r ? JSON.parse(r.value) : fallback;
+    }catch(e){ /* seguimos abajo por si acaso */ }
+  }
+  if (STORAGE_MODE === 'indexeddb' || STORAGE_MODE === 'cloud' || STORAGE_MODE === 'supabase'){
+    try{
+      const v = await idbGet(key);
+      if (v !== null && v !== undefined) return v;
+      if (STORAGE_MODE === 'indexeddb') return fallback;
+    }catch(e){ /* seguimos abajo */ }
+  }
+  if (STORAGE_MODE === 'cloud' || STORAGE_MODE === 'local'){
+    try{
+      const raw = localStorage.getItem('ccc_local:'+key);
+      return raw !== null ? JSON.parse(raw) : fallback;
+    }catch(e){ /* seguimos abajo */ }
+  }
+  if (Object.prototype.hasOwnProperty.call(MEMORY_STORE, key)){
+    try{ return JSON.parse(MEMORY_STORE[key]); }catch(e){ return fallback; }
+  }
+  return fallback;
+}
+async function dbSet(key, value){
+  let supaOk = false, cloudOk = false, idbOk = false, localOk = false;
+  if (STORAGE_MODE === 'supabase'){
+    try{ await supabaseSet(key, value); supaOk = true; }catch(e){ supaOk = false; }
+  }
+  if (STORAGE_MODE === 'cloud'){
+    try{ await window.storage.set(key, JSON.stringify(value), true); cloudOk = true; }
+    catch(e){ cloudOk = false; STORAGE_OK = false; }
+  }
+  if (STORAGE_MODE === 'indexeddb' || STORAGE_MODE === 'cloud' || STORAGE_MODE === 'supabase'){
+    try{ await idbSet(key, value); idbOk = true; }catch(e){ idbOk = false; }
+  }
+  if (STORAGE_MODE === 'local'){
+    try{ localStorage.setItem('ccc_local:'+key, JSON.stringify(value)); localOk = true; }
+    catch(e){ localOk = false; }
+  }
+  // Siempre espejo en memoria como último respaldo dentro de la misma sesión
+  MEMORY_STORE[key] = JSON.stringify(value);
+  if (STORAGE_MODE === 'supabase' && !supaOk){ STORAGE_MODE = idbOk ? 'indexeddb' : 'memory'; }
+  else if (STORAGE_MODE === 'cloud' && !cloudOk){ STORAGE_MODE = idbOk ? 'indexeddb' : 'memory'; }
+  else if (STORAGE_MODE === 'indexeddb' && !idbOk){ STORAGE_MODE = 'memory'; }
+  else if (STORAGE_MODE === 'local' && !localOk){ STORAGE_MODE = 'memory'; }
+}
+async function loadAll(){
+  await cargarConfigSupabase();
+  await verificarAlmacenamiento();
+  await recargarDatosDeNegocio();
+  const yaSeSembro = await dbGet('ccc:seeded', false);
+  if (!yaSeSembro && DB.familias.length === 0 && DB.estudiantes.length === 0){
+    seedSampleData();
+    // Se usa dbSet directo (no save*) porque esta siembra ocurre antes de cualquier inicio de sesión;
+    // el guardia de autenticación bloquearía estos guardados si pasaran por saveFamilias/saveEstudiantes/etc.
+    await dbSet('ccc:familias', DB.familias);
+    await dbSet('ccc:estudiantes', DB.estudiantes);
+    await dbSet('ccc:cuentas', DB.cuentas);
+    await dbSet('ccc:seguimientos', DB.seguimientos);
+    await dbSet('ccc:abonos', DB.abonos);
+  }
+  if (!yaSeSembro) await dbSet('ccc:seeded', true);
+}
+// Recarga todas las colecciones desde la fuente de almacenamiento actualmente activa (STORAGE_MODE).
+// Se usa tanto en el arranque como cada vez que se cambia de backend (ej. al conectar/desconectar Supabase),
+// para que la app siempre muestre lo que realmente hay en la fuente activa, no datos viejos en memoria.
+async function recargarDatosDeNegocio(){
+  DB.familias = await dbGet('ccc:familias', []);
+  DB.estudiantes = await dbGet('ccc:estudiantes', []);
+  DB.actividades = await dbGet('ccc:actividades', []);
+  DB.estudianteActividades = await dbGet('ccc:estudiante_actividades', []);
+  DB.cuentas = await dbGet('ccc:cuentas', []);
+  DB.cuentas.forEach(c=>{ if (c.balanceAnioAnterior === undefined) c.balanceAnioAnterior = 0; });
+  DB.seguimientos = await dbGet('ccc:seguimientos', []);
+  DB.abonos = await dbGet('ccc:abonos', []);
+  DB.auditoria = await dbGet('ccc:auditoria', []);
+  const usuariosGuardados = await dbGet('ccc:usuarios', null);
+  DB.usuarios = usuariosGuardados || [];
+  let migrated = false;
+  for (const u of DB.usuarios){
+    if (!u.correo){ u.correo = (u.nombre||'usuario').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'') + '@sunegocio.com'; migrated = true; }
+    if (!u.passwordHash){ u.passwordHash = await hashText('cambiar123'); migrated = true; }
+    if (!u.pregunta){ u.pregunta = '¿Cuál es su color favorito?'; u.respuestaHash = await hashText('azul'); migrated = true; }
+    if (u.intentosFallidos === undefined){ u.intentosFallidos = 0; migrated = true; }
+    if (u.bloqueadoHasta === undefined){ u.bloqueadoHasta = null; migrated = true; }
+    if (!u.ultimoAcceso){ u.ultimoAcceso = null; migrated = true; }
+    if (!u.creadoEl){ u.creadoEl = new Date().toISOString(); migrated = true; }
+  }
+  if (migrated) await saveUsuarios();
+  DB.catalogos = await dbGet('ccc:catalogos', DB.catalogos);
+}
+function seedSampleData(){
+  DB.familias = [
+    {codigo:"FAM-0001", responsable:"Juana Pérez de Rodríguez", tel1:"809-555-0101", tel2:"829-555-0202", correo:"jperez@correo.com", direccion:"Calle Duarte #12, SPM", estado:"Activo", _demo:true},
+    {codigo:"FAM-0002", responsable:"Carlos Mateo", tel1:"849-555-0303", tel2:"", correo:"", direccion:"", estado:"Activo", _demo:true}
+  ];
+  DB.estudiantes = [
+    {codigo:"EST-0001", nombre:"María Rodríguez Pérez", codigoFamilia:"FAM-0001", nivel:"Nivel Primario", grado:"3er Grado A", internado:"No", internadoInicio:"", internadoFin:"", estado:"Activo", _demo:true},
+    {codigo:"EST-0002", nombre:"Luis Mateo Fernández", codigoFamilia:"FAM-0002", nivel:"Nivel Secundario", grado:"1er Año B", internado:"Si", internadoInicio:"2026-02-01", internadoFin:"", estado:"Activo", _demo:true}
+  ];
+  DB.cuentas = [
+    {id:cuid(), codigoEstudiante:"EST-0001", periodo:"2026-09", mesesAdeudados:1, balanceAnioAnterior:6000, balance:5000, fechaUltimoPago:"2026-05-10", montoUltimoPago:5000, estado:"Pendiente", responsable:"Ana Gómez", fechaUltimaGestion:"2026-09-01", proximoSeguimiento:"2026-09-15", observaciones:"Arrastra deuda del año escolar 2025-2026.", _demo:true},
+    {id:cuid(), codigoEstudiante:"EST-0001", periodo:"2026-10", mesesAdeudados:2, balanceAnioAnterior:6000, balance:10000, fechaUltimoPago:"2026-05-10", montoUltimoPago:5000, estado:"Contactado", responsable:"Ana Gómez", fechaUltimaGestion:"2026-10-01", proximoSeguimiento:"2026-10-10", observaciones:"Promete pagar el 15.", _demo:true},
+    {id:cuid(), codigoEstudiante:"EST-0002", periodo:"2026-10", mesesAdeudados:2, balanceAnioAnterior:0, balance:16000, fechaUltimoPago:"", montoUltimoPago:"", estado:"Sin respuesta", responsable:"Ana Gómez", fechaUltimaGestion:"2026-09-20", proximoSeguimiento:"2026-10-05", observaciones:"No contesta llamadas.", _demo:true}
+  ];
+  DB.seguimientos = [
+    {id:cuid(), fecha:"2026-09-01", codigoEstudiante:"EST-0001", responsable:"Ana Gómez", medio:"Llamada", resultado:"Promesa de pago", proximaGestion:"2026-09-15", observaciones:"Pagará antes de fin de mes.", creadoPor:"Ana Gómez", _demo:true},
+    {id:cuid(), fecha:"2026-09-20", codigoEstudiante:"EST-0002", responsable:"Ana Gómez", medio:"WhatsApp", resultado:"No respondió", proximaGestion:"2026-10-05", observaciones:"", creadoPor:"Ana Gómez", _demo:true}
+  ];
+  DB.abonos = [
+    {id:cuid(), codigoEstudiante:"EST-0001", cuentaId:DB.cuentas[1].id, fecha:"2026-10-05", monto:4000, observaciones:"Abono parcial en efectivo.", registradoPor:"Ana Gómez", _demo:true}
+  ];
+}
+function requireAuth(accion){
+  if (!SESSION.authenticated){
+    console.warn('Bloqueado: se intentó "' + accion + '" sin una sesión iniciada.');
+    return false;
+  }
+  return true;
+}
+// Guardado con fusión segura: en modo nube compartida, varias personas pueden guardar casi
+// al mismo tiempo. Sobrescribir el arreglo completo a ciegas puede perder el cambio de otra
+// persona ("lost update"). Aquí se vuelve a leer la versión más reciente justo antes de
+// escribir, se fusiona por clave (nuestros cambios locales ganan sobre esa clave, pero lo que
+// otros agregaron y nosotros no tocamos se conserva), y se aplican las eliminaciones explícitas.
+async function mergeYGuardar(storageKey, localArray, keyField, deletedKeys){
+  let resultado = localArray;
+  if (STORAGE_MODE === 'cloud' || STORAGE_MODE === 'supabase'){
+    try{
+      const remoto = await dbGet(storageKey, []);
+      const map = new Map();
+      remoto.forEach(item => map.set(item[keyField], item));
+      localArray.forEach(item => map.set(item[keyField], item));
+      if (deletedKeys && deletedKeys.length) deletedKeys.forEach(k => map.delete(k));
+      resultado = Array.from(map.values());
+    }catch(e){ /* si la fusión falla, se guarda solo lo local (comportamiento previo, seguro) */ }
+  }
+  await dbSet(storageKey, resultado);
+  return resultado;
+}
+async function saveFamilias(deletedKeys){ if(!requireAuth('guardar familias')) return; DB.familias = await mergeYGuardar('ccc:familias', DB.familias, 'codigo', deletedKeys); }
+async function saveEstudiantes(deletedKeys){ if(!requireAuth('guardar estudiantes')) return; DB.estudiantes = await mergeYGuardar('ccc:estudiantes', DB.estudiantes, 'codigo', deletedKeys); }
+async function saveCuentas(deletedKeys){ if(!requireAuth('guardar cuentas')) return; DB.cuentas = await mergeYGuardar('ccc:cuentas', DB.cuentas, 'id', deletedKeys); }
+async function saveSeguimientos(deletedKeys){ if(!requireAuth('guardar seguimientos')) return; DB.seguimientos = await mergeYGuardar('ccc:seguimientos', DB.seguimientos, 'id', deletedKeys); }
+async function saveAbonos(deletedKeys){ if(!requireAuth('guardar abonos')) return; DB.abonos = await mergeYGuardar('ccc:abonos', DB.abonos, 'id', deletedKeys); }
+async function saveCatalogos(){ if(!requireAuth('guardar catálogos')) return; await dbSet('ccc:catalogos', DB.catalogos); }
+// saveUsuarios NO exige sesión: se usa también durante el login (bloqueo por intentos) y la configuración inicial.
+async function saveUsuarios(){ await dbSet('ccc:usuarios', DB.usuarios); }
+async function saveActividades(){ if(!requireAuth('guardar actividades')) return; await dbSet('ccc:actividades', DB.actividades); await dbSet('ccc:estudiante_actividades', DB.estudianteActividades); }
+// saveAuditoria NO exige sesión: debe poder registrar intentos fallidos de acceso.
+async function saveAuditoria(){ await dbSet('ccc:auditoria', DB.auditoria); }
+function registrarAuditoria(accion, detalle){
+  DB.auditoria.push({ id:cuid(), fecha:new Date().toISOString(), usuario: (SESSION && (SESSION.correo||SESSION.usuario)) || 'anónimo', accion, detalle: detalle||'' });
+  if (DB.auditoria.length > 1000) DB.auditoria = DB.auditoria.slice(-1000);
+  saveAuditoria();
+}
+
+function cuid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+
+/* =========================================================================
+   ROLES Y PERMISOS
+   ========================================================================= */
+const ROLE_LABEL = {admin:"Administrador", contable:"Contable", auxiliar:"Auxiliar"};
+const PERMS = {
+  admin:    { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:true, gestionarUsuarios:true, editarFicha:true, editarSoloPropio:false },
+  contable: { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
+  auxiliar: { verDashboard:true, editarCuenta:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
+};
+let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
+function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
+
+function renderSessionBar(){
+  const userLabel = document.getElementById('sessionUserLabel');
+  if (userLabel) userLabel.textContent = SESSION.usuario ? `${SESSION.usuario}` : '—';
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) logoutBtn.onclick = ()=> cerrarSesion('Sesión cerrada correctamente.');
+  const pill = document.getElementById('rolePill');
+  pill.textContent = ROLE_LABEL[SESSION.rol] || '—';
+  pill.className = 'role-pill role-' + (SESSION.rol||'auxiliar');
+
+  const badge = document.getElementById('storageBadge');
+  if (badge){
+    const info = {
+      supabase:  {cls:'cloud',  text:'🐘 Supabase (base de datos real)'},
+      cloud:     {cls:'cloud',  text:'☁️ Nube compartida (Claude.ai)'},
+      indexeddb: {cls:'cloud',  text:'🗄️ Este dispositivo (IndexedDB)'},
+      local:     {cls:'local',  text:'💾 Este navegador (localStorage)'},
+      memory:    {cls:'memory', text:'⚠️ Sin guardar — exporta un respaldo'},
+      checking:  {cls:'local',  text:'Verificando almacenamiento…'}
+    }[STORAGE_MODE] || {cls:'local', text:'Verificando…'};
+    badge.className = 'storage-badge ' + info.cls;
+    badge.textContent = info.text;
+  }
+}
+
+/* =========================================================================
+   NAVEGACIÓN
+   ========================================================================= */
+const NAV = [
+  {id:'dashboard', label:'Dashboard', icon:'01', needs:'verDashboard'},
+  {id:'reporte', label:'Reporte Mensual', icon:'02', needs:'verDashboard'},
+  {id:'importar', label:'Importar Datos', icon:'03', needs:'importar'},
+  {id:'fichas', label:'Estudiantes / Familias', icon:'04', needs:'verDashboard'},
+  {id:'historial', label:'Historial de Seguimiento', icon:'05', needs:'verDashboard'},
+  {id:'catalogos', label:'Catálogos', icon:'06', needs:'verDashboard'},
+  {id:'usuarios', label:'Usuarios y Roles', icon:'07', needs:'gestionarUsuarios'},
+  {id:'respaldo', label:'Respaldo de Datos', icon:'08', needs:'gestionarUsuarios'},
+  {id:'auditoria', label:'Auditoría', icon:'09', needs:'gestionarUsuarios'},
+  {id:'basededatos', label:'Base de Datos (Supabase)', icon:'10', needs:'gestionarUsuarios'}
+];
+let currentView = 'dashboard';
+let fichaFilterEstudiante = null;
+
+function renderNav(){
+  const nav = document.getElementById('navlist');
+  nav.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'nav-section-label';
+  label.textContent = 'Módulos';
+  nav.appendChild(label);
+  NAV.forEach(item=>{
+    const allowed = perm(item.needs) || item.needs === 'verDashboard';
+    const btn = document.createElement('button');
+    btn.className = 'navlink' + (currentView===item.id?' active':'');
+    if (item.id==='catalogos' && !perm('editarCatalogos')) { /* still viewable read-only */ }
+    if (item.id==='usuarios' && !perm('gestionarUsuarios')) { btn.disabled = true; }
+    if (item.id==='respaldo' && !perm('gestionarUsuarios')) { btn.disabled = true; }
+    if (item.id==='auditoria' && !perm('gestionarUsuarios')) { btn.disabled = true; }
+    if (item.id==='basededatos' && !perm('gestionarUsuarios')) { btn.disabled = true; }
+    if (item.id==='importar' && !perm('importar')) { btn.disabled = true; }
+    btn.innerHTML = `<span class="ic">${item.icon}</span> ${item.label}`;
+    btn.onclick = ()=>{ currentView = item.id; renderAll(); };
+    nav.appendChild(btn);
+  });
+}
+
+const TITLES = {
+  dashboard:['Dashboard','Panel general de cuentas críticas por cobrar'],
+  reporte:['Reporte Mensual','Listado de cuentas críticas del periodo, con semáforo de mora'],
+  importar:['Importar Datos','Cargue Familias/Estudiantes o el Reporte Mensual desde Excel/CSV'],
+  fichas:['Estudiantes / Familias','Busque y consulte la ficha completa de cada familia'],
+  historial:['Historial de Seguimiento','Todas las gestiones registradas, en orden cronológico'],
+  catalogos:['Catálogos','Listas administrables usadas en todo el sistema'],
+  usuarios:['Usuarios y Roles','Administración de accesos: Administrador / Contable / Auxiliar'],
+  respaldo:['Respaldo de Datos','Exporta, restaura y prepara el sistema para uso real'],
+  auditoria:['Auditoría','Quién hizo qué y cuándo, incluyendo intentos de acceso'],
+  basededatos:['Base de Datos (Supabase)','Conecte un backend real para sincronización multi-dispositivo genuina']
+};
+
+function renderAll(){
+  renderNav();
+  renderSessionBar();
+  document.getElementById('pageTitle').textContent = TITLES[currentView][0];
+  document.getElementById('pageSub').textContent = TITLES[currentView][1];
+  const view = document.getElementById('view');
+  view.innerHTML = '';
+  if (currentView==='usuarios' && !perm('gestionarUsuarios')) { currentView='dashboard'; }
+  if (currentView==='respaldo' && !perm('gestionarUsuarios')) { currentView='dashboard'; }
+  if (currentView==='auditoria' && !perm('gestionarUsuarios')) { currentView='dashboard'; }
+  if (currentView==='basededatos' && !perm('gestionarUsuarios')) { currentView='dashboard'; }
+  if (currentView==='importar' && !perm('importar')) { currentView='dashboard'; }
+  ({
+    dashboard: renderDashboard, reporte: renderReporte, importar: renderImportar,
+    fichas: renderFichas, historial: renderHistorial, catalogos: renderCatalogos, usuarios: renderUsuarios,
+    respaldo: renderRespaldo, auditoria: renderAuditoria, basededatos: renderBaseDeDatos
+  })[currentView](view);
+}
+
+/* =========================================================================
+   HELPERS DE NEGOCIO
+   ========================================================================= */
+function semaforo(meses){
+  meses = Number(meses)||0;
+  if (meses <= 0) return {c:'verde', l:'Al día'};
+  if (meses === 3) return {c:'amarillo', l:'3 meses'};
+  if (meses >= 4 && meses <=5) return {c:'naranja', l:meses+' meses'};
+  if (meses >= 6) return {c:'rojo', l:meses+' meses o más'};
+  return {c:'verde', l:meses+' meses'};
+}
+function fmtMoney(n){
+  n = Number(n)||0;
+  return 'RD$ ' + n.toLocaleString('es-DO',{minimumFractionDigits:0,maximumFractionDigits:0});
+}
+function normCode(s){ return String(s||'').trim().toUpperCase(); }
+function estudianteByCodigo(cod){ const c=normCode(cod); return DB.estudiantes.find(e=>normCode(e.codigo)===c); }
+function familiaByCodigo(cod){ const c=normCode(cod); return DB.familias.find(f=>normCode(f.codigo)===c); }
+function periodosDisponibles(){
+  return [...new Set(DB.cuentas.map(c=>c.periodo))].sort().reverse();
+}
+function ultimoPeriodo(){ const p = periodosDisponibles(); return p[0] || null; }
+function diasDesde(fechaStr){
+  if(!fechaStr) return Infinity;
+  const d = new Date(fechaStr); const now = new Date();
+  return Math.floor((now-d)/(1000*60*60*24));
+}
+
+// El ciclo de seguimiento de cuentas críticas va de Septiembre a Julio (no agosto).
+const MESES_CICLO_ESCOLAR = ['09','10','11','12','01','02','03','04','05','06','07'];
+function anioEscolar(periodo){
+  if (!periodo || !/^\d{4}-\d{2}$/.test(periodo)) return '';
+  const [y,m] = periodo.split('-').map(Number);
+  return (m>=9) ? `${y}-${y+1}` : `${y-1}-${y}`;
+}
+function esMesFueraDeCiclo(periodo){
+  if (!periodo || !/^\d{4}-\d{2}$/.test(periodo)) return false;
+  const mes = periodo.split('-')[1];
+  return !MESES_CICLO_ESCOLAR.includes(mes);
+}
+function abonosDeCuenta(cuentaId){
+  return DB.abonos.filter(a=>a.cuentaId===cuentaId).sort((a,b)=>a.fecha.localeCompare(b.fecha));
+}
+function totalAbonadoCuenta(cuentaId){
+  return abonosDeCuenta(cuentaId).reduce((s,a)=>s+Number(a.monto||0),0);
+}
+function abonosDeEstudiante(codigoEstudiante){
+  return DB.abonos.filter(a=>a.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+}
+function balanceOriginal(cuenta){
+  return Number(cuenta.balanceAnioAnterior||0) + Number(cuenta.balance||0);
+}
+function balancePendiente(cuenta){
+  return Math.max(0, balanceOriginal(cuenta) - totalAbonadoCuenta(cuenta.id));
+}
+
+/* =========================================================================
+   RESPALDO / RESTAURACIÓN / LIMPIEZA DE DATOS DE MUESTRA
+   ========================================================================= */
+function hasDemoData(){
+  return DB.familias.some(f=>f._demo) || DB.estudiantes.some(e=>e._demo) || DB.cuentas.some(c=>c._demo) || DB.seguimientos.some(s=>s._demo) || DB.abonos.some(a=>a._demo);
+}
+async function eliminarDatosDemo(){
+  DB.familias = DB.familias.filter(f=>!f._demo);
+  DB.estudiantes = DB.estudiantes.filter(e=>!e._demo);
+  DB.cuentas = DB.cuentas.filter(c=>!c._demo);
+  DB.seguimientos = DB.seguimientos.filter(s=>!s._demo);
+  DB.abonos = DB.abonos.filter(a=>!a._demo);
+  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos();
+  registrarAuditoria('Datos de muestra eliminados', '');
+}
+function exportBackup(){
+  const payload = {
+    version: 1, sistema: 'Cuentas Críticas por Cobrar', exportadoEl: new Date().toISOString(),
+    DB: {
+      familias: DB.familias, estudiantes: DB.estudiantes, actividades: DB.actividades,
+      estudianteActividades: DB.estudianteActividades, cuentas: DB.cuentas, seguimientos: DB.seguimientos,
+      usuarios: DB.usuarios, abonos: DB.abonos, catalogos: DB.catalogos, auditoria: DB.auditoria
+    }
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `respaldo_cuentas_criticas_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  registrarAuditoria('Respaldo exportado', '');
+}
+async function importBackupFile(file, onDone, onError){
+  try{
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    if (!payload || !payload.DB) throw new Error('El archivo no tiene el formato de respaldo esperado.');
+    const d = payload.DB;
+    DB.familias = d.familias || [];
+    DB.estudiantes = d.estudiantes || [];
+    DB.actividades = d.actividades || [];
+    DB.estudianteActividades = d.estudianteActividades || [];
+    DB.cuentas = d.cuentas || [];
+    DB.seguimientos = d.seguimientos || [];
+    DB.usuarios = d.usuarios || DB.usuarios;
+    DB.abonos = d.abonos || [];
+    DB.catalogos = d.catalogos || DB.catalogos;
+    DB.auditoria = d.auditoria || DB.auditoria;
+    await saveFamilias(); await saveEstudiantes(); await saveActividades();
+    await saveCuentas(); await saveSeguimientos(); await saveUsuarios(); await saveAbonos(); await saveCatalogos();
+    await dbSet('ccc:seeded', true);
+    registrarAuditoria('Respaldo restaurado', file.name||'');
+    if (onDone) onDone();
+  }catch(e){ if (onError) onError(e); }
+}
+
+/* =========================================================================
+   DASHBOARD
+   ========================================================================= */
+function renderDashboard(root){
+  const periodos = periodosDisponibles();
+  const periodoSel = root.dataset.periodo || ultimoPeriodo();
+  root.innerHTML = `
+    <div class="toolbar">
+      <div class="field"><label>Periodo (ciclo Sept–Jul)</label>
+        <select id="dashPeriodo">${periodos.length? periodos.map(p=>`<option value="${p}" ${p===periodoSel?'selected':''}>${p} · Año escolar ${anioEscolar(p)}</option>`).join(''):'<option value="">Sin datos</option>'}</select>
+      </div>
+      <div class="field"><label>Nivel académico</label>
+        <select id="dashNivel"><option value="">Todos</option>${DB.catalogos.niveles.map(n=>`<option>${n}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Actividad</label>
+        <select id="dashActividad"><option value="">Todas</option>${DB.catalogos.actividades.map(a=>`<option>${a}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div id="dashBody"></div>
+  `;
+  const draw = ()=>{
+    const periodo = document.getElementById('dashPeriodo').value;
+    const nivel = document.getElementById('dashNivel').value;
+    const actividad = document.getElementById('dashActividad').value;
+    drawDashboardBody(periodo, nivel, actividad);
+  };
+  document.getElementById('dashPeriodo').onchange = draw;
+  document.getElementById('dashNivel').onchange = draw;
+  document.getElementById('dashActividad').onchange = draw;
+  draw();
+}
+function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
+  const body = document.getElementById('dashBody');
+  if (!periodo || DB.cuentas.length===0){
+    body.innerHTML = `<div class="card"><div class="empty"><div class="big">◌</div>Aún no hay datos cargados.<br><span class="small">Importe el Reporte Mensual desde el módulo "Importar Datos" para ver el dashboard.</span></div></div>`;
+    return;
+  }
+  let rows = DB.cuentas.filter(c=>c.periodo===periodo).map(c=>({...c, _est: estudianteByCodigo(c.codigoEstudiante)}));
+  if (nivelFiltro) rows = rows.filter(r=>r._est && r._est.nivel===nivelFiltro);
+  if (actividadFiltro){
+    const codsConActividad = new Set(DB.estudianteActividades.filter(ea=>ea.actividad===actividadFiltro && ea.estado==='Activa').map(ea=>ea.codigoEstudiante));
+    rows = rows.filter(r=>codsConActividad.has(r.codigoEstudiante));
+  }
+  const familiasSet = new Set(rows.map(r=> r._est ? r._est.codigoFamilia : null).filter(Boolean));
+  const balanceTotal = rows.filter(r=>r.estado!=='Regularizado').reduce((s,r)=>s+balancePendiente(r),0);
+  const rangos = {r3:0,r4_5:0,r6:0};
+  rows.forEach(r=>{
+    const m = Number(r.mesesAdeudados||0);
+    if (m===3) rangos.r3++; else if (m>=4&&m<=5) rangos.r4_5++; else if (m>=6) rangos.r6++;
+  });
+  const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && new Date(r.proximoSeguimiento) < new Date()));
+  const top10 = [...rows].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
+
+  const maxRango = Math.max(rangos.r3, rangos.r4_5, rangos.r6, 1);
+  body.innerHTML = `
+    ${(hasDemoData() && perm('gestionarUsuarios')) ? `<div class="alertbox">Este sistema todavía tiene <b>datos de muestra</b> cargados. Antes de usarlo con información real, ve a <span class="linklike" id="dashGoRespaldo">Respaldo de Datos</span> para eliminarlos.</div>` : ''}
+    ${STORAGE_MODE==='local' ? `<div class="note">Tus datos se están guardando solo en este navegador (no en la nube compartida). Si varias personas usarán el sistema, revisa <span class="linklike" id="dashGoRespaldo2">Respaldo de Datos</span> para más detalles.</div>` : ''}
+    ${STORAGE_MODE==='memory' ? `<div class="alertbox"><b>Nada se está guardando ahora mismo.</b> Si recargas o cierras esta página, perderás los cambios. Ve a <span class="linklike" id="dashGoRespaldo2">Respaldo de Datos</span> para ver el diagnóstico y exportar un respaldo cuanto antes.</div>` : ''}
+    <div class="grid grid-4">
+      <div class="stat"><div class="label">Familias con cuentas críticas</div><div class="value">${familiasSet.size}</div><div class="sub">Periodo ${periodo}</div></div>
+      <div class="stat"><div class="label">Estudiantes en mora</div><div class="value">${rows.length}</div><div class="sub">de los cuales ${rows.filter(r=>r.estado==='Regularizado').length} regularizados</div></div>
+      <div class="stat"><div class="label">Balance total pendiente</div><div class="value">${fmtMoney(balanceTotal)}</div><div class="sub">Ya descontados los abonos registrados</div></div>
+      <div class="stat"><div class="label">Sin seguimiento reciente</div><div class="value" style="color:var(--rojo)">${sinSeguimiento.length}</div><div class="sub">+15 días o seguimiento vencido</div></div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:18px;">
+      <div class="card">
+        <h2>Distribución de mora por rango</h2>
+        <div class="chart-bars">
+          <div class="chart-col"><div class="chart-val">${rangos.r3}</div><div class="chart-bar" style="height:${10+ (rangos.r3/maxRango)*120}px;background:var(--amarillo)"></div><div class="chart-label">3 meses</div></div>
+          <div class="chart-col"><div class="chart-val">${rangos.r4_5}</div><div class="chart-bar" style="height:${10+(rangos.r4_5/maxRango)*120}px;background:var(--naranja)"></div><div class="chart-label">4–5 meses</div></div>
+          <div class="chart-col"><div class="chart-val">${rangos.r6}</div><div class="chart-bar" style="height:${10+(rangos.r6/maxRango)*120}px;background:var(--rojo)"></div><div class="chart-label">6+ meses</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Alerta: familias sin seguimiento reciente <span class="n">${sinSeguimiento.length}</span></h2>
+        ${sinSeguimiento.length===0 ? '<div class="small">No hay alertas pendientes. Buen trabajo.</div>' :
+          `<div class="tablewrap" style="max-height:220px;"><table><thead><tr><th>Estudiante</th><th>Familia</th><th>Última gestión</th><th>Próximo seg.</th></tr></thead><tbody>
+          ${sinSeguimiento.map(r=>`<tr><td>${r._est?r._est.nombre:r.codigoEstudiante}</td><td>${r._est?(familiaByCodigo(r._est.codigoFamilia)||{}).responsable||'':''}</td><td class="mono">${r.fechaUltimaGestion||'—'}</td><td class="mono">${r.proximoSeguimiento||'—'}</td></tr>`).join('')}
+          </tbody></table></div>`}
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Top 10 mayores deudores</h2>
+      <div class="tablewrap" style="max-height:360px;">
+        <table>
+          <thead><tr><th>#</th><th>Estudiante</th><th>Nivel</th><th>Meses</th><th>Balance original</th><th>Abonado</th><th>Pendiente</th><th>Semáforo</th><th>Estado</th></tr></thead>
+          <tbody>
+          ${top10.map((r,i)=>{ const s = semaforo(r.mesesAdeudados); return `<tr>
+            <td>${i+1}</td><td>${r._est?r._est.nombre:r.codigoEstudiante}</td><td>${r._est?r._est.nivel:''}</td>
+            <td class="mono">${r.mesesAdeudados}</td><td class="mono">${fmtMoney(balanceOriginal(r))}</td>
+            <td class="mono" style="color:var(--verde)">${fmtMoney(totalAbonadoCuenta(r.id))}</td>
+            <td class="mono" style="font-weight:700;">${fmtMoney(balancePendiente(r))}</td>
+            <td><span class="badge b-${s.c}"><span class="dot dot-${s.c}"></span>${s.l}</span></td><td>${r.estado}</td></tr>`; }).join('') || '<tr><td colspan="9" class="small">Sin registros</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  const goRespaldo = ()=>{ currentView='respaldo'; renderAll(); };
+  const l1 = document.getElementById('dashGoRespaldo'); if (l1) l1.onclick = goRespaldo;
+  const l2 = document.getElementById('dashGoRespaldo2'); if (l2) l2.onclick = goRespaldo;
+}
+
+/* =========================================================================
+   REPORTE MENSUAL
+   ========================================================================= */
+function renderReporte(root){
+  const periodos = periodosDisponibles();
+  const periodo = ultimoPeriodo();
+  root.innerHTML = `
+    <div class="note">Ciclo de seguimiento: <b>Septiembre a Julio</b>. El "Balance pendiente" ya descuenta los abonos registrados para cada estudiante.</div>
+    <div class="toolbar">
+      <div class="field"><label>Periodo</label><select id="rPeriodo">${periodos.map(p=>`<option value="${p}" ${p===periodo?'selected':''}>${p} · ${anioEscolar(p)}</option>`).join('') || '<option value="">Sin datos</option>'}</select></div>
+      <div class="field"><label>Nivel</label><select id="rNivel"><option value="">Todos</option>${DB.catalogos.niveles.map(n=>`<option>${n}</option>`).join('')}</select></div>
+      <div class="field"><label>Grado/Sección</label><select id="rGrado"><option value="">Todos</option>${DB.catalogos.grados.map(n=>`<option>${n}</option>`).join('')}</select></div>
+      <div class="field"><label>Estado</label><select id="rEstado"><option value="">Todos</option>${DB.catalogos.estadosCuenta.map(n=>`<option>${n}</option>`).join('')}</select></div>
+      <div class="field"><label>Responsable</label><select id="rResp"><option value="">Todos</option>${DB.catalogos.responsables.map(n=>`<option>${n}</option>`).join('')}</select></div>
+      <div class="field"><label>Rango de mora</label><select id="rRango"><option value="">Todos</option><option value="3">3 meses</option><option value="4_5">4–5 meses</option><option value="6">6+ meses</option></select></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="rExport">⭳ Exportar CSV</button></div>
+      ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th>Código</th><th>Estudiante</th><th>Nivel</th><th>Grado</th><th>Internado</th><th>Familia</th><th>Teléfono</th>
+          <th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Abonado</th><th>Bal. pendiente</th><th>Últ. pago</th><th>Semáforo</th><th>Estado</th><th>Responsable</th><th>Últ. gestión</th><th>Próx. seg.</th><th>Observaciones</th><th></th>
+        </tr></thead>
+        <tbody id="rBody"></tbody>
+        <tfoot><tr class="tfoot-row"><td colspan="7">Totales (filtrado)</td><td id="rTotCasos"></td><td colspan="2"></td><td id="rTotBalance"></td><td colspan="9"></td></tr></tfoot>
+      </table>
+    </div>
+  `;
+  const draw = ()=>{
+    const p = document.getElementById('rPeriodo').value;
+    const nivel = document.getElementById('rNivel').value;
+    const grado = document.getElementById('rGrado').value;
+    const estado = document.getElementById('rEstado').value;
+    const resp = document.getElementById('rResp').value;
+    const rango = document.getElementById('rRango').value;
+    let rows = DB.cuentas.filter(c=>c.periodo===p).map(c=>({...c,_est:estudianteByCodigo(c.codigoEstudiante)}));
+    if (nivel) rows = rows.filter(r=>r._est && r._est.nivel===nivel);
+    if (grado) rows = rows.filter(r=>r._est && r._est.grado===grado);
+    if (estado) rows = rows.filter(r=>r.estado===estado);
+    if (resp) rows = rows.filter(r=>r.responsable===resp);
+    if (rango) rows = rows.filter(r=>{
+      const m = Number(r.mesesAdeudados||0);
+      if (rango==='3') return m===3; if (rango==='4_5') return m>=4&&m<=5; if (rango==='6') return m>=6; return true;
+    });
+    const tbody = document.getElementById('rBody');
+    tbody.innerHTML = rows.map(r=>{
+      const s = semaforo(r.mesesAdeudados);
+      const fam = r._est ? familiaByCodigo(r._est.codigoFamilia) : null;
+      const canEditEstado = perm('editarCuenta');
+      const abonado = totalAbonadoCuenta(r.id);
+      const pendiente = balancePendiente(r);
+      return `<tr>
+        <td class="mono">${r.codigoEstudiante}</td>
+        <td>${r._est?r._est.nombre:'<span class="pill-error">No encontrado</span>'}</td>
+        <td>${r._est?r._est.nivel:''}</td>
+        <td>${r._est?r._est.grado:''}</td>
+        <td>${r._est?r._est.internado:''}</td>
+        <td>${fam?fam.responsable:''}</td>
+        <td class="mono">${fam?fam.tel1:''}</td>
+        <td class="mono">${r.mesesAdeudados}</td>
+        <td class="mono">${fmtMoney(r.balanceAnioAnterior)}</td>
+        <td class="mono">${fmtMoney(r.balance)}</td>
+        <td class="mono" style="color:var(--verde)">${fmtMoney(abonado)}</td>
+        <td class="mono" style="font-weight:700;">${fmtMoney(pendiente)}</td>
+        <td class="mono">${r.fechaUltimoPago||'—'}</td>
+        <td><span class="badge b-${s.c}"><span class="dot dot-${s.c}"></span>${s.l}</span></td>
+        <td>${canEditEstado ? `<select data-id="${r.id}" class="estadoSel">${DB.catalogos.estadosCuenta.map(e=>`<option ${e===r.estado?'selected':''}>${e}</option>`).join('')}</select>` : r.estado}</td>
+        <td>${r.responsable||''}</td>
+        <td class="mono">${r.fechaUltimaGestion||'—'}</td>
+        <td class="mono">${r.proximoSeguimiento||'—'}</td>
+        <td>${canEditEstado ? `<input type="text" class="obsInput" data-id="${r.id}" value="${(r.observaciones||'').replace(/"/g,'&quot;')}" placeholder="Escribir observación…" style="min-width:160px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:var(--font-ui);font-size:12.3px;">` : `<span class="small">${r.observaciones||''}</span>`}</td>
+        <td style="white-space:nowrap;">
+          ${canEditEstado?`<button class="btn btn-sm btn-primary" data-abono="${r.id}">+ Abono</button>`:''}
+          <button class="btn btn-sm" data-gest="${r.id}">+ Gestión</button>
+          ${canEditEstado?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
+        </td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="19" class="empty">No hay registros con estos filtros.</td></tr>`;
+    document.getElementById('rTotCasos').textContent = rows.length + ' casos';
+    document.getElementById('rTotBalance').textContent = fmtMoney(rows.reduce((s,r)=>s+balancePendiente(r),0));
+
+    tbody.querySelectorAll('.estadoSel').forEach(sel=>{
+      sel.onchange = async ()=>{
+        const c = DB.cuentas.find(c=>c.id===sel.dataset.id);
+        c.estado = sel.value; await saveCuentas(); draw();
+      };
+    });
+    tbody.querySelectorAll('.obsInput').forEach(inp=>{
+      inp.onchange = async ()=>{
+        const c = DB.cuentas.find(c=>c.id===inp.dataset.id);
+        c.observaciones = inp.value; await saveCuentas();
+      };
+    });
+    tbody.querySelectorAll('[data-delcuenta]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if (!confirm('¿Eliminar este registro de cuenta crítica del periodo? Esta acción no se puede deshacer. Los abonos asociados también se eliminarán.')) return;
+        const cuentaId = btn.dataset.delcuenta;
+        const cuentaBorrada = DB.cuentas.find(c=>c.id===cuentaId);
+        const abonosBorrados = DB.abonos.filter(a=>a.cuentaId===cuentaId).map(a=>a.id);
+        DB.abonos = DB.abonos.filter(a=>a.cuentaId!==cuentaId);
+        DB.cuentas = DB.cuentas.filter(c=>c.id!==cuentaId);
+        await saveAbonos(abonosBorrados); await saveCuentas([cuentaId]);
+        registrarAuditoria('Cuenta crítica eliminada', cuentaBorrada ? `${cuentaBorrada.codigoEstudiante} · ${cuentaBorrada.periodo}` : cuentaId);
+        draw();
+      };
+    });
+    tbody.querySelectorAll('[data-gest]').forEach(btn=>{
+      btn.onclick = ()=> openGestionModal(btn.dataset.gest, draw);
+    });
+    tbody.querySelectorAll('[data-abono]').forEach(btn=>{
+      btn.onclick = ()=> openAbonoModal(btn.dataset.abono, draw);
+    });
+    document.getElementById('rExport').onclick = ()=> exportCSV(rows.map(r=>({
+      Codigo:r.codigoEstudiante, Estudiante:r._est?r._est.nombre:'', Nivel:r._est?r._est.nivel:'', Grado:r._est?r._est.grado:'',
+      Internado:r._est?r._est.internado:'', Familia: (r._est?(familiaByCodigo(r._est.codigoFamilia)||{}).responsable:''),
+      Meses_Adeudados:r.mesesAdeudados, Balance_Anio_Anterior:r.balanceAnioAnterior, Balance_Meses_Actuales:r.balance,
+      Abonado:totalAbonadoCuenta(r.id), Balance_Pendiente:balancePendiente(r), Estado:r.estado, Responsable:r.responsable,
+      Ultima_Gestion:r.fechaUltimaGestion, Proximo_Seguimiento:r.proximoSeguimiento, Observaciones:r.observaciones
+    })), `reporte_mensual_${p}.csv`);
+  };
+  ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango'].forEach(id=> document.getElementById(id).onchange = draw);
+  const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
+  if (nuevaCuentaBtn) nuevaCuentaBtn.onclick = ()=> openCuentaModal(null, document.getElementById('rPeriodo').value, ()=>{ renderReporte(root); });
+  if (periodos.length) draw(); else document.getElementById('rBody').innerHTML = `<tr><td colspan="19" class="empty">Aún no hay datos importados.</td></tr>`;
+}
+
+function openAbonoModal(cuentaId, onDone){
+  const c = DB.cuentas.find(c=>c.id===cuentaId);
+  const est = estudianteByCodigo(c.codigoEstudiante);
+  const pendienteAntes = balancePendiente(c);
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>Registrar abono</h3>
+      <p class="small">${est?est.nombre:c.codigoEstudiante} · ${c.codigoEstudiante} · Periodo ${c.periodo}</p>
+      <p class="small">Balance pendiente actual: <b class="mono">${fmtMoney(pendienteAntes)}</b></p>
+      <div class="formgrid">
+        <div><label>Fecha del abono</label><input type="date" id="aFecha" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div><label>Monto abonado</label><input type="number" id="aMonto" min="0" step="0.01" placeholder="0.00"></div>
+        <div class="full"><label>Observaciones</label><textarea id="aObs" placeholder="Ej. Pago en efectivo, transferencia, referencia…"></textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="aCancel">Cancelar</button>
+        <button class="btn btn-primary" id="aGuardar">Guardar abono</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('aCancel').onclick = closeModal;
+  document.getElementById('aGuardar').onclick = async ()=>{
+    const monto = Number(document.getElementById('aMonto').value||0);
+    const fecha = document.getElementById('aFecha').value;
+    if (!fecha){ alert('Indique la fecha del abono.'); return; }
+    if (!monto || monto <= 0){ alert('Indique un monto de abono mayor a cero.'); return; }
+    DB.abonos.push({ id:cuid(), codigoEstudiante:c.codigoEstudiante, cuentaId:c.id, fecha, monto, observaciones:document.getElementById('aObs').value, registradoPor:SESSION.usuario });
+    if (!c.fechaUltimoPago || fecha >= c.fechaUltimoPago) { c.fechaUltimoPago = fecha; c.montoUltimoPago = monto; }
+    await saveAbonos(); await saveCuentas();
+    registrarAuditoria('Abono registrado', `${c.codigoEstudiante} · ${fmtMoney(monto)} · ${fecha}`);
+    closeModal(); if (onDone) onDone();
+  };
+}
+
+function openCuentaModal(cuentaId, periodoSugerido, onDone){
+  const editing = cuentaId ? DB.cuentas.find(c=>c.id===cuentaId) : null;
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>${editing?'Editar registro de cuenta crítica':'Agregar registro de cuenta crítica'}</h3>
+      <p class="small">Escriba directamente los datos del estudiante para este periodo. No se sobrescriben periodos anteriores.</p>
+      <div class="formgrid">
+        <div><label>Estudiante</label>
+          <select id="cEstudiante">${DB.estudiantes.map(e=>`<option value="${e.codigo}" ${editing&&editing.codigoEstudiante===e.codigo?'selected':''}>${e.nombre} (${e.codigo})</option>`).join('') || '<option value="">No hay estudiantes — cree uno primero</option>'}</select>
+        </div>
+        <div><label>Periodo (AAAA-MM, ciclo Sept–Jul)</label><input type="text" id="cPeriodo" placeholder="2026-09" value="${editing?editing.periodo:(periodoSugerido||'')}"></div>
+        <div><label>Meses adeudados (año en curso)</label><input type="number" id="cMeses" min="0" value="${editing?editing.mesesAdeudados:''}"></div>
+        <div><label>Balance año anterior</label><input type="number" id="cBalanceAnioAnt" min="0" step="0.01" placeholder="0.00" value="${editing?editing.balanceAnioAnterior:'0'}"></div>
+        <div><label>Balance meses año actual</label><input type="number" id="cBalance" min="0" step="0.01" value="${editing?editing.balance:''}"></div>
+        <div><label>Fecha último pago</label><input type="date" id="cFechaPago" value="${editing?editing.fechaUltimoPago:''}"></div>
+        <div><label>Monto último pago</label><input type="number" id="cMontoPago" min="0" step="0.01" value="${editing?editing.montoUltimoPago:''}"></div>
+        <div><label>Estado de gestión</label><select id="cEstado">${DB.catalogos.estadosCuenta.map(e=>`<option ${editing&&editing.estado===e?'selected':''}>${e}</option>`).join('')}</select></div>
+        <div><label>Responsable asignado</label><select id="cResp">${DB.catalogos.responsables.map(r=>`<option ${editing&&editing.responsable===r?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Última gestión</label><input type="date" id="cUltGest" value="${editing?editing.fechaUltimaGestion:''}"></div>
+        <div><label>Próximo seguimiento</label><input type="date" id="cProxSeg" value="${editing?editing.proximoSeguimiento:''}"></div>
+        <div class="full"><label>Observaciones</label><textarea id="cObs">${editing?editing.observaciones:''}</textarea></div>
+      </div>
+      <p class="small">Los abonos (pagos) no se registran aquí — una vez creado el registro, use el botón "+ Abono" en el Reporte Mensual para ir descontándolos del balance.</p>
+      <div class="modal-actions">
+        <button class="btn" id="cCancel">Cancelar</button>
+        <button class="btn btn-primary" id="cGuardar">${editing?'Guardar cambios':'Agregar registro'}</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('cCancel').onclick = closeModal;
+  document.getElementById('cGuardar').onclick = async ()=>{
+    const codigoEstudiante = document.getElementById('cEstudiante').value;
+    const periodo = document.getElementById('cPeriodo').value.trim();
+    if (!codigoEstudiante){ alert('Debe seleccionar un estudiante.'); return; }
+    if (!/^\d{4}-\d{2}$/.test(periodo)){ alert('El periodo debe tener formato AAAA-MM, por ejemplo 2026-09.'); return; }
+    if (esMesFueraDeCiclo(periodo) && !confirm('El mes indicado está fuera del ciclo de seguimiento (Septiembre a Julio). ¿Desea continuar de todas formas?')) return;
+    const data = {
+      codigoEstudiante, periodo,
+      mesesAdeudados: Number(document.getElementById('cMeses').value||0),
+      balanceAnioAnterior: Number(document.getElementById('cBalanceAnioAnt').value||0),
+      balance: Number(document.getElementById('cBalance').value||0),
+      fechaUltimoPago: document.getElementById('cFechaPago').value,
+      montoUltimoPago: document.getElementById('cMontoPago').value,
+      estado: document.getElementById('cEstado').value,
+      responsable: document.getElementById('cResp').value,
+      fechaUltimaGestion: document.getElementById('cUltGest').value,
+      proximoSeguimiento: document.getElementById('cProxSeg').value,
+      observaciones: document.getElementById('cObs').value
+    };
+    if (editing){ Object.assign(editing, data); }
+    else { DB.cuentas.push({id:cuid(), ...data}); }
+    await saveCuentas();
+    registrarAuditoria(editing?'Cuenta crítica editada':'Cuenta crítica creada', `${codigoEstudiante} · ${periodo}`);
+    closeModal(); if (onDone) onDone();
+  };
+}
+
+function openGestionModal(cuentaId, onDone){
+  const c = DB.cuentas.find(c=>c.id===cuentaId);
+  const est = estudianteByCodigo(c.codigoEstudiante);
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>Registrar gestión</h3>
+      <p class="small">${est?est.nombre:c.codigoEstudiante} · ${c.codigoEstudiante}</p>
+      <div class="formgrid">
+        <div><label>Fecha</label><input type="date" id="gFecha" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div><label>Responsable</label><select id="gResp">${DB.catalogos.responsables.map(r=>`<option ${r===SESSION.usuario?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Medio de contacto</label><select id="gMedio">${DB.catalogos.mediosContacto.map(m=>`<option>${m}</option>`).join('')}</select></div>
+        <div><label>Resultado</label><select id="gResultado">${DB.catalogos.resultadosGestion.map(r=>`<option>${r}</option>`).join('')}</select></div>
+        <div><label>Próxima gestión</label><input type="date" id="gProxima"></div>
+        <div class="full"><label>Observaciones</label><textarea id="gObs"></textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="gCancel">Cancelar</button>
+        <button class="btn btn-primary" id="gGuardar">Guardar gestión</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('gCancel').onclick = closeModal;
+  document.getElementById('gGuardar').onclick = async ()=>{
+    const seg = {
+      id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: c.codigoEstudiante,
+      responsable: document.getElementById('gResp').value, medio: document.getElementById('gMedio').value,
+      resultado: document.getElementById('gResultado').value, proximaGestion: document.getElementById('gProxima').value,
+      observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario
+    };
+    DB.seguimientos.push(seg);
+    c.fechaUltimaGestion = seg.fecha;
+    if (seg.proximaGestion) c.proximoSeguimiento = seg.proximaGestion;
+    await saveSeguimientos(); await saveCuentas();
+    registrarAuditoria('Gestión registrada', `${c.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
+    closeModal(); if (onDone) onDone();
+  };
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function exportCSV(rows, filename){
+  if (!rows.length){ alert('No hay filas para exportar.'); return; }
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>`"${String(r[h]??'').replace(/"/g,'""')}"`).join(','))).join('\n');
+  const blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+}
+
+/* =========================================================================
+   IMPORTAR DATOS
+   ========================================================================= */
+let importTab = 'familias';
+function renderImportar(root){
+  root.innerHTML = `
+    <div class="tabs">
+      <div class="tab ${importTab==='familias'?'active':''}" data-tab="familias">Familias y Estudiantes</div>
+      <div class="tab ${importTab==='reporte'?'active':''}" data-tab="reporte">Reporte Mensual</div>
+    </div>
+    <div id="importBody"></div>
+  `;
+  root.querySelectorAll('.tab').forEach(t=> t.onclick = ()=>{ importTab = t.dataset.tab; renderImportar(root); });
+  if (importTab==='familias') renderImportarFamilias(document.getElementById('importBody'));
+  else renderImportarReporte(document.getElementById('importBody'));
+}
+
+function downloadTemplate(kind){
+  const wb = XLSX.utils.book_new();
+  let headers, example;
+  if (kind==='familias'){
+    headers = ["Codigo_Familia*","Nombre_Responsable_Pago*","Telefono_Principal*","Telefono_Secundario","Correo","Direccion","Estado_Familia*"];
+    example = ["FAM-0003","Nombre Ejemplo","809-000-0000","","","","Activo"];
+  } else if (kind==='estudiantes'){
+    headers = ["Codigo_Estudiante*","Nombre_Completo*","Codigo_Familia*","Nivel_Academico*","Grado_Seccion*","Internado(Si/No)*","Internado_Fecha_Inicio","Internado_Fecha_Fin","Estado_Estudiante*"];
+    example = ["EST-0003","Nombre Ejemplo","FAM-0003","Nivel Primario","1er Grado A","No","","","Activo"];
+  } else {
+    headers = ["Codigo_Estudiante*","Periodo_Reporte(AAAA-MM)*","Meses_Adeudados*","Balance_Anio_Anterior","Balance_Meses_Actuales*","Fecha_Ultimo_Pago","Monto_Ultimo_Pago","Estado_Gestion*","Responsable_Asignado*","Fecha_Ultima_Gestion","Proximo_Seguimiento","Observaciones"];
+    example = ["EST-0001","2026-09",1,6000,8000,"","","Contactado","Ana Gómez","","",""];
+  }
+  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+  ws['!cols'] = headers.map(()=>({wch:20}));
+  XLSX.utils.book_append_sheet(wb, ws, "Plantilla");
+  XLSX.writeFile(wb, `plantilla_${kind}.xlsx`);
+}
+
+function readFileAsRows(file, cb){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const wb = XLSX.read(e.target.result, {type:'binary'});
+    const ws = wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase()!=='instrucciones') || wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    cb(rows);
+  };
+  reader.readAsBinaryString(file);
+}
+function normKey(k){ return k.replace(/\*/g,'').replace(/\(.*?\)/g,'').trim(); }
+function normalizeRow(row){
+  const out = {};
+  Object.keys(row).forEach(k=>{
+    const key = normKey(k);
+    let v = row[k];
+    // Excel a veces guarda columnas de código como números (pierde ceros a la izquierda, etc.)
+    // Forzamos texto para que las comparaciones de código sean siempre consistentes.
+    if (v !== null && v !== undefined) v = String(v).trim();
+    if (key.indexOf('Codigo')===0) v = normCode(v);
+    out[key] = v;
+  });
+  return out;
+}
+function isExampleRow(row, keyField){
+  return false; // el usuario debe borrar filas de ejemplo; no se filtra automáticamente para evitar perder datos reales
+}
+
+function renderImportarFamilias(root){
+  root.innerHTML = `
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>1. Descargar plantilla</h2>
+        <p class="small">Descargue la plantilla en blanco, llénela y vuelva a subirla. No modifique los encabezados.</p>
+        <div style="display:flex;gap:10px;margin-top:10px;">
+          <button class="btn" id="tplFam">⭳ Plantilla Familias</button>
+          <button class="btn" id="tplEst">⭳ Plantilla Estudiantes</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>2. Subir archivo (Excel/CSV)</h2>
+        <label class="dropzone" id="dz1">
+          <div>📄 Haga clic para seleccionar el archivo de <b>Familias</b></div>
+          <input type="file" id="fileFam" accept=".xlsx,.xls,.csv">
+        </label>
+        <label class="dropzone" id="dz2" style="margin-top:10px;">
+          <div>📄 Haga clic para seleccionar el archivo de <b>Estudiantes</b></div>
+          <input type="file" id="fileEst" accept=".xlsx,.xls,.csv">
+        </label>
+      </div>
+    </div>
+    <div id="previewFam"></div>
+    <div id="previewEst"></div>
+  `;
+  document.getElementById('tplFam').onclick = ()=>downloadTemplate('familias');
+  document.getElementById('tplEst').onclick = ()=>downloadTemplate('estudiantes');
+  document.getElementById('fileFam').onchange = (e)=>{
+    if (!e.target.files[0]) return;
+    readFileAsRows(e.target.files[0], rows=> previewFamilias(rows.map(normalizeRow)));
+  };
+  document.getElementById('fileEst').onchange = (e)=>{
+    if (!e.target.files[0]) return;
+    readFileAsRows(e.target.files[0], rows=> previewEstudiantes(rows.map(normalizeRow)));
+  };
+}
+
+function previewFamilias(rows){
+  const req = ["Codigo_Familia","Nombre_Responsable_Pago","Telefono_Principal","Estado_Familia"];
+  const codesSeen = new Set(); let hardErrors = 0;
+  const analyzed = rows.map(r=>{
+    const errs = [];
+    req.forEach(f=>{ if(!r[f]) errs.push(`Falta ${f}`); });
+    if (r.Codigo_Familia){
+      if (codesSeen.has(r.Codigo_Familia)) errs.push('Código duplicado en archivo');
+      codesSeen.add(r.Codigo_Familia);
+    }
+    if (r.Estado_Familia && !['Activo','Inactivo'].includes(r.Estado_Familia)) errs.push('Estado inválido');
+    if (errs.length) hardErrors++;
+    const existe = !!familiaByCodigo(r.Codigo_Familia);
+    return {r, errs, accion: existe?'Actualizar':'Crear'};
+  });
+  const box = document.getElementById('previewFam');
+  box.innerHTML = `
+    <div class="card">
+      <h2>Vista previa — Familias <span class="n">${rows.length} filas</span></h2>
+      ${hardErrors>0?`<div class="alertbox">${hardErrors} fila(s) con errores. Corríjalas en el archivo y vuelva a subirlo, o se omitirán al confirmar.</div>`:''}
+      <div class="tablewrap" style="max-height:300px;">
+        <table><thead><tr><th>Código</th><th>Responsable</th><th>Teléfono</th><th>Estado</th><th>Acción</th><th>Validación</th></tr></thead>
+        <tbody>${analyzed.map(a=>`<tr>
+          <td class="mono">${a.r.Codigo_Familia||''}</td><td>${a.r.Nombre_Responsable_Pago||''}</td><td class="mono">${a.r.Telefono_Principal||''}</td><td>${a.r.Estado_Familia||''}</td>
+          <td>${a.accion}</td>
+          <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : `<span class="pill-ok">OK</span>`}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>
+      <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmFam">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button></div>
+    </div>`;
+  document.getElementById('confirmFam').onclick = async ()=>{
+    let creados=0, actualizados=0;
+    analyzed.filter(a=>a.errs.length===0).forEach(a=>{
+      const r = a.r;
+      const obj = {codigo:r.Codigo_Familia, responsable:r.Nombre_Responsable_Pago, tel1:r.Telefono_Principal, tel2:r.Telefono_Secundario||'', correo:r.Correo||'', direccion:r.Direccion||'', estado:r.Estado_Familia};
+      const idx = DB.familias.findIndex(f=>normCode(f.codigo)===normCode(obj.codigo));
+      if (idx>=0){ DB.familias[idx] = obj; actualizados++; } else { DB.familias.push(obj); creados++; }
+    });
+    await saveFamilias();
+    registrarAuditoria('Importación de familias', `${creados} creada(s), ${actualizados} actualizada(s)`);
+    box.innerHTML = `<div class="note">Importación completada: ${creados} familia(s) creada(s), ${actualizados} actualizada(s).</div>`;
+  };
+}
+function previewEstudiantes(rows){
+  const req = ["Codigo_Estudiante","Nombre_Completo","Codigo_Familia","Nivel_Academico","Grado_Seccion","Internado","Estado_Estudiante"];
+  const codesSeen = new Set(); 
+  const analyzed = rows.map(r=>{
+    const errs = [];
+    req.forEach(f=>{ if(!r[f]) errs.push(`Falta ${f}`); });
+    if (r.Codigo_Estudiante){ if(codesSeen.has(r.Codigo_Estudiante)) errs.push('Código duplicado en archivo'); codesSeen.add(r.Codigo_Estudiante); }
+    if (r.Codigo_Familia && !familiaByCodigo(r.Codigo_Familia)) errs.push('Familia no existe — impórtela primero');
+    if (r.Nivel_Academico && !DB.catalogos.niveles.includes(r.Nivel_Academico)) errs.push('Nivel académico no reconocido');
+    if (r.Internado && !['Si','No'].includes(r.Internado)) errs.push('Internado debe ser Si/No');
+    if (errs.length===0 || errs.every(e=>e.includes('Familia no existe'))) {}
+    const existe = !!estudianteByCodigo(r.Codigo_Estudiante);
+    return {r, errs, accion: existe?'Actualizar':'Crear'};
+  });
+  const hardErrors = analyzed.filter(a=>a.errs.length>0).length;
+  const box = document.getElementById('previewEst');
+  box.innerHTML = `
+    <div class="card">
+      <h2>Vista previa — Estudiantes <span class="n">${rows.length} filas</span></h2>
+      ${hardErrors>0?`<div class="alertbox">${hardErrors} fila(s) con errores.</div>`:''}
+      <div class="tablewrap" style="max-height:300px;">
+        <table><thead><tr><th>Código</th><th>Nombre</th><th>Familia</th><th>Nivel</th><th>Internado</th><th>Acción</th><th>Validación</th></tr></thead>
+        <tbody>${analyzed.map(a=>`<tr>
+          <td class="mono">${a.r.Codigo_Estudiante||''}</td><td>${a.r.Nombre_Completo||''}</td><td class="mono">${a.r.Codigo_Familia||''}</td><td>${a.r.Nivel_Academico||''}</td><td>${a.r.Internado||''}</td>
+          <td>${a.accion}</td>
+          <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : `<span class="pill-ok">OK</span>`}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>
+      <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmEst">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button></div>
+    </div>`;
+  document.getElementById('confirmEst').onclick = async ()=>{
+    let creados=0, actualizados=0;
+    analyzed.filter(a=>a.errs.length===0).forEach(a=>{
+      const r = a.r;
+      const obj = {codigo:r.Codigo_Estudiante, nombre:r.Nombre_Completo, codigoFamilia:r.Codigo_Familia, nivel:r.Nivel_Academico, grado:r.Grado_Seccion, internado:r.Internado, internadoInicio:r.Internado_Fecha_Inicio||'', internadoFin:r.Internado_Fecha_Fin||'', estado:r.Estado_Estudiante};
+      const idx = DB.estudiantes.findIndex(e=>normCode(e.codigo)===normCode(obj.codigo));
+      if (idx>=0){ DB.estudiantes[idx]=obj; actualizados++; } else { DB.estudiantes.push(obj); creados++; }
+    });
+    await saveEstudiantes();
+    registrarAuditoria('Importación de estudiantes', `${creados} creado(s), ${actualizados} actualizado(s)`);
+    box.innerHTML = `<div class="note">Importación completada: ${creados} estudiante(s) creado(s), ${actualizados} actualizado(s).</div>`;
+  };
+}
+
+function renderImportarReporte(root){
+  root.innerHTML = `
+    <div class="note">Ciclo de seguimiento: <b>Septiembre a Julio</b>. Si una familia arrastra deuda de un año escolar anterior, repórtela en la columna <b>Balance_Anio_Anterior</b>; la deuda de los meses del año en curso va en <b>Balance_Meses_Actuales</b>. Los abonos (pagos) se registran directamente en la app, con fecha, desde el Reporte Mensual — no se importan por Excel.</div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>1. Descargar plantilla</h2>
+        <p class="small">Un renglón por cada estudiante en mora, para el periodo que va a reportar.</p>
+        <button class="btn" id="tplRep">⭳ Plantilla Reporte Mensual</button>
+      </div>
+      <div class="card">
+        <h2>2. Subir archivo (Excel/CSV)</h2>
+        <label class="dropzone" id="dzRep">
+          <div>📄 Haga clic para seleccionar el archivo del <b>Reporte Mensual</b></div>
+          <input type="file" id="fileRep" accept=".xlsx,.xls,.csv">
+        </label>
+      </div>
+    </div>
+    <div id="previewRep"></div>
+  `;
+  document.getElementById('tplRep').onclick = ()=>downloadTemplate('reporte');
+  document.getElementById('fileRep').onchange = (e)=>{
+    if (!e.target.files[0]) return;
+    readFileAsRows(e.target.files[0], rows=> previewReporte(rows.map(normalizeRow)));
+  };
+}
+function previewReporte(rows){
+  const req = ["Codigo_Estudiante","Periodo_Reporte","Meses_Adeudados","Balance_Meses_Actuales","Estado_Gestion","Responsable_Asignado"];
+  let crearFaltantes = false;
+  const analyze = ()=> rows.map(r=>{
+    const errs = []; const warns = [];
+    req.forEach(f=>{ if(r[f]===undefined || r[f]==='') errs.push(`Falta ${f}`); });
+    if (r.Estado_Gestion && !DB.catalogos.estadosCuenta.includes(r.Estado_Gestion)) errs.push('Estado de gestión no reconocido');
+    if (r.Meses_Adeudados!==undefined && isNaN(Number(r.Meses_Adeudados))) errs.push('Meses adeudados debe ser numérico');
+    if (r.Balance_Meses_Actuales!==undefined && isNaN(Number(r.Balance_Meses_Actuales))) errs.push('Balance de meses actuales debe ser numérico');
+    if (r.Balance_Anio_Anterior!==undefined && r.Balance_Anio_Anterior!=='' && isNaN(Number(r.Balance_Anio_Anterior))) errs.push('Balance año anterior debe ser numérico');
+    if (r.Periodo_Reporte && esMesFueraDeCiclo(r.Periodo_Reporte)) warns.push('Mes fuera del ciclo Sept–Jul');
+    const existe = !!estudianteByCodigo(r.Codigo_Estudiante);
+    if (!existe && !crearFaltantes) warns.push('Estudiante no existe en el sistema');
+    return {r, errs, warns, existe};
+  });
+  const box = document.getElementById('previewRep');
+  function draw(){
+    const analyzed = analyze();
+    const hardErrors = analyzed.filter(a=>a.errs.length>0).length;
+    const faltantes = analyzed.filter(a=>!a.existe).length;
+    box.innerHTML = `
+      <div class="card">
+        <h2>Vista previa — Reporte Mensual <span class="n">${rows.length} filas</span></h2>
+        ${hardErrors>0?`<div class="alertbox">${hardErrors} fila(s) con errores de formato — no se importarán.</div>`:''}
+        ${faltantes>0?`<div class="note">${faltantes} fila(s) referencian estudiantes que no existen todavía en el sistema.
+          <label style="margin-left:10px;"><input type="checkbox" id="chkCrear" ${crearFaltantes?'checked':''}> Crear automáticamente estos estudiantes (con datos mínimos, editables luego en "Estudiantes/Familias")</label></div>`:''}
+        <div class="tablewrap" style="max-height:320px;">
+          <table><thead><tr><th>Código Est.</th><th>Periodo</th><th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Estado</th><th>Responsable</th><th>Validación</th></tr></thead>
+          <tbody>${analyzed.map(a=>`<tr>
+            <td class="mono">${a.r.Codigo_Estudiante||''}</td><td class="mono">${a.r.Periodo_Reporte||''}</td><td class="mono">${a.r.Meses_Adeudados??''}</td>
+            <td class="mono">${a.r.Balance_Anio_Anterior||0}</td><td class="mono">${a.r.Balance_Meses_Actuales??''}</td>
+            <td>${a.r.Estado_Gestion||''}</td><td>${a.r.Responsable_Asignado||''}</td>
+            <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : (a.warns.length? `<span class="pill-warn">${a.warns.join('; ')}</span>` : `<span class="pill-ok">OK</span>`)}</td>
+          </tr>`).join('')}</tbody></table>
+        </div>
+        <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmRep">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} filas)</button></div>
+      </div>`;
+    const chk = document.getElementById('chkCrear');
+    if (chk) chk.onchange = ()=>{ crearFaltantes = chk.checked; draw(); };
+    document.getElementById('confirmRep').onclick = async ()=>{
+      let importadas = 0, estCreados = 0;
+      analyzed.filter(a=>a.errs.length===0).forEach(a=>{
+        const r = a.r;
+        if (!a.existe){
+          if (!crearFaltantes) return;
+          DB.estudiantes.push({codigo:r.Codigo_Estudiante, nombre:'(Pendiente de completar)', codigoFamilia:'', nivel:'', grado:'', internado:'No', internadoInicio:'', internadoFin:'', estado:'Activo'});
+          estCreados++;
+        }
+        DB.cuentas.push({
+          id: cuid(), codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
+          balanceAnioAnterior:Number(r.Balance_Anio_Anterior||0), balance:Number(r.Balance_Meses_Actuales), fechaUltimoPago:r.Fecha_Ultimo_Pago||'', montoUltimoPago:r.Monto_Ultimo_Pago||'',
+          estado:r.Estado_Gestion, responsable:r.Responsable_Asignado, fechaUltimaGestion:r.Fecha_Ultima_Gestion||'',
+          proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||''
+        });
+        importadas++;
+      });
+      await saveCuentas(); if (estCreados) await saveEstudiantes();
+      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s) automáticamente`);
+      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente (complete sus datos en la ficha)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>`;
+    };
+  }
+  draw();
+}
+
+/* =========================================================================
+   FICHAS ESTUDIANTES / FAMILIAS
+   ========================================================================= */
+function renderFichas(root){
+  const canEdit = perm('editarFicha');
+  root.innerHTML = `
+    <div class="toolbar">
+      <div class="searchbar"><input id="fichaSearch" placeholder="Buscar por nombre de estudiante, código o familia…"></div>
+      ${canEdit?`<div class="field"><label>&nbsp;</label><button class="btn" id="fNuevaFamilia">+ Nueva familia</button></div>
+      <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="fNuevoEstudiante">+ Nuevo estudiante</button></div>`:''}
+    </div>
+    <div class="grid grid-2" style="align-items:start;">
+      <div class="card"><h2>Estudiantes <span class="n" id="fichaCount"></span></h2><div class="tablewrap" style="max-height:560px;"><table><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Familia</th></tr></thead><tbody id="fichaList"></tbody></table></div></div>
+      <div id="fichaDetail" class="card"><div class="empty">Seleccione un estudiante para ver su ficha completa.</div></div>
+    </div>
+  `;
+  const search = document.getElementById('fichaSearch');
+  const drawList = ()=>{
+    const q = (search.value||'').toLowerCase();
+    let list = DB.estudiantes.filter(e=>{
+      const fam = familiaByCodigo(e.codigoFamilia);
+      return e.nombre.toLowerCase().includes(q) || e.codigo.toLowerCase().includes(q) || (fam&&fam.responsable.toLowerCase().includes(q));
+    });
+    document.getElementById('fichaCount').textContent = list.length;
+    document.getElementById('fichaList').innerHTML = list.map(e=>`<tr class="linklike-row" data-c="${e.codigo}"><td class="mono">${e.codigo}</td><td>${e.nombre}</td><td>${e.nivel}</td><td>${(familiaByCodigo(e.codigoFamilia)||{}).responsable||''}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Sin resultados</td></tr>`;
+    document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.style.cursor='pointer');
+    document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.onclick = ()=> drawDetail(tr.dataset.c));
+  };
+  function drawDetail(codigo){
+    const est = estudianteByCodigo(codigo); const fam = familiaByCodigo(est.codigoFamilia);
+    const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigo).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+    const segEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigo).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+    const abonosEst = abonosDeEstudiante(codigo);
+    const acts = DB.estudianteActividades.filter(a=>a.codigoEstudiante===codigo);
+    const editable = perm('editarFicha');
+    document.getElementById('fichaDetail').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:start;">
+        <h2>${est.nombre} <span class="n mono">${est.codigo}</span></h2>
+        ${editable?`<div style="display:flex;gap:6px;"><button class="btn btn-sm" id="editEstBtn">Editar estudiante</button>${fam?`<button class="btn btn-sm" id="editFamBtn">Editar familia</button>`:''}</div>`:''}
+      </div>
+      <div class="grid grid-2">
+        <div><span class="small">Nivel</span><div>${est.nivel||'—'}</div></div>
+        <div><span class="small">Grado/Sección</span><div>${est.grado||'—'}</div></div>
+        <div><span class="small">Internado</span><div>${est.internado} ${est.internadoInicio?`(desde ${est.internadoInicio})`:''}</div></div>
+        <div><span class="small">Estado</span><div>${est.estado}</div></div>
+        <div><span class="small">Familia</span><div>${fam?fam.responsable:'—'}</div></div>
+        <div><span class="small">Teléfono</span><div class="mono">${fam?fam.tel1:'—'}</div></div>
+      </div>
+      ${!editable?'<p class="small" style="margin-top:8px;">Modo solo lectura para su rol.</p>':''}
+      <hr class="sep">
+      <h2>Actividades</h2>
+      <div class="catlist">${acts.length? acts.map(a=>`<span class="cattag">${a.actividad} · ${a.periodo} (${a.estado})</span>`).join('') : '<span class="small">Sin actividades registradas.</span>'}</div>
+      ${editable?`<div class="addrow"><select id="actSel">${DB.catalogos.actividades.map(a=>`<option>${a}</option>`).join('')}</select><input id="actPeriodo" placeholder="Periodo (ej. 2026-09)"><button class="btn btn-sm" id="actAdd">Agregar actividad</button></div>`:''}
+      <hr class="sep">
+      <h2>Historial de balances mes a mes</h2>
+      <div class="tablewrap" style="max-height:240px;"><table><thead><tr><th>Periodo</th><th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Abonado</th><th>Pendiente</th><th>Estado</th></tr></thead>
+      <tbody>${cuentasEst.map(c=>`<tr><td class="mono">${c.periodo}</td><td class="mono">${c.mesesAdeudados}</td><td class="mono">${fmtMoney(c.balanceAnioAnterior)}</td><td class="mono">${fmtMoney(c.balance)}</td><td class="mono" style="color:var(--verde)">${fmtMoney(totalAbonadoCuenta(c.id))}</td><td class="mono" style="font-weight:700;">${fmtMoney(balancePendiente(c))}</td><td>${c.estado}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Sin historial</td></tr>'}</tbody></table></div>
+      <hr class="sep">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2>Historial de abonos</h2>
+        ${editable && cuentasEst.length ? `<button class="btn btn-sm btn-primary" id="fichaAddAbono">+ Registrar abono</button>` : ''}
+      </div>
+      <div class="tablewrap" style="max-height:200px;"><table><thead><tr><th>Fecha</th><th>Periodo aplicado</th><th>Monto</th><th>Observaciones</th><th>Registrado por</th></tr></thead>
+      <tbody>${abonosEst.map(a=>{ const cta = DB.cuentas.find(c=>c.id===a.cuentaId); return `<tr><td class="mono">${a.fecha}</td><td class="mono">${cta?cta.periodo:'—'}</td><td class="mono">${fmtMoney(a.monto)}</td><td class="small">${a.observaciones||''}</td><td class="small">${a.registradoPor||''}</td></tr>`; }).join('')||'<tr><td colspan="5" class="empty">Sin abonos registrados.</td></tr>'}</tbody></table></div>
+      <hr class="sep">
+      <h2>Historial de seguimientos</h2>
+      <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span></div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
+    `;
+    if (editable){
+      const editEstBtn = document.getElementById('editEstBtn');
+      if (editEstBtn) editEstBtn.onclick = ()=> openEstudianteModal(est.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
+      const editFamBtn = document.getElementById('editFamBtn');
+      if (editFamBtn) editFamBtn.onclick = ()=> openFamiliaModal(fam.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
+      const actAdd = document.getElementById('actAdd');
+      if (actAdd) actAdd.onclick = async ()=>{
+        const periodoVal = document.getElementById('actPeriodo').value.trim();
+        if (!periodoVal){ alert('Indique el periodo de la actividad.'); return; }
+        DB.estudianteActividades.push({codigoEstudiante:est.codigo, actividad:document.getElementById('actSel').value, periodo:periodoVal, estado:'Activa'});
+        await saveActividades(); drawDetail(est.codigo);
+      };
+      const addAbonoBtn = document.getElementById('fichaAddAbono');
+      if (addAbonoBtn) addAbonoBtn.onclick = ()=> openAbonoModal(cuentasEst[0].id, ()=> drawDetail(est.codigo));
+    }
+  }
+  search.oninput = drawList;
+  const nuevaFam = document.getElementById('fNuevaFamilia');
+  if (nuevaFam) nuevaFam.onclick = ()=> openFamiliaModal(null, drawList);
+  const nuevoEst = document.getElementById('fNuevoEstudiante');
+  if (nuevoEst) nuevoEst.onclick = ()=> openEstudianteModal(null, drawList);
+  drawList();
+}
+
+function openFamiliaModal(codigoFamilia, onDone){
+  const editing = codigoFamilia ? familiaByCodigo(codigoFamilia) : null;
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>${editing?'Editar familia':'Nueva familia'}</h3>
+      <div class="formgrid">
+        <div><label>Código de familia</label><input id="famCodigo" value="${editing?editing.codigo:''}" ${editing?'disabled':''} placeholder="FAM-0003"></div>
+        <div><label>Nombre del responsable de pago</label><input id="famResp" value="${editing?editing.responsable:''}"></div>
+        <div><label>Teléfono principal</label><input id="famTel1" value="${editing?editing.tel1:''}"></div>
+        <div><label>Teléfono secundario</label><input id="famTel2" value="${editing?editing.tel2:''}"></div>
+        <div><label>Correo</label><input id="famCorreo" value="${editing?editing.correo:''}"></div>
+        <div><label>Estado</label><select id="famEstado"><option ${editing&&editing.estado==='Activo'?'selected':''}>Activo</option><option ${editing&&editing.estado==='Inactivo'?'selected':''}>Inactivo</option></select></div>
+        <div class="full"><label>Dirección</label><input id="famDireccion" value="${editing?editing.direccion:''}"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="famCancel">Cancelar</button>
+        <button class="btn btn-primary" id="famGuardar">${editing?'Guardar cambios':'Crear familia'}</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('famCancel').onclick = closeModal;
+  document.getElementById('famGuardar').onclick = async ()=>{
+    const codigo = editing ? editing.codigo : normCode(document.getElementById('famCodigo').value);
+    if (!codigo){ alert('El código de familia es obligatorio.'); return; }
+    if (!editing && familiaByCodigo(codigo)){ alert('Ya existe una familia con ese código.'); return; }
+    const data = {
+      codigo, responsable: document.getElementById('famResp').value.trim(),
+      tel1: document.getElementById('famTel1').value.trim(), tel2: document.getElementById('famTel2').value.trim(),
+      correo: document.getElementById('famCorreo').value.trim(), direccion: document.getElementById('famDireccion').value.trim(),
+      estado: document.getElementById('famEstado').value
+    };
+    if (!data.responsable || !data.tel1){ alert('Nombre del responsable y teléfono principal son obligatorios.'); return; }
+    if (editing){ Object.assign(editing, data); } else { DB.familias.push(data); }
+    await saveFamilias();
+    closeModal(); if (onDone) onDone();
+  };
+}
+
+function openEstudianteModal(codigoEstudiante, onDone){
+  const editing = codigoEstudiante ? estudianteByCodigo(codigoEstudiante) : null;
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>${editing?'Editar estudiante':'Nuevo estudiante'}</h3>
+      <div class="formgrid">
+        <div><label>Código de estudiante</label><input id="estCodigo" value="${editing?editing.codigo:''}" ${editing?'disabled':''} placeholder="EST-0003"></div>
+        <div><label>Nombre completo</label><input id="estNombre" value="${editing?editing.nombre:''}"></div>
+        <div><label>Familia</label><select id="estFamilia">${DB.familias.map(f=>`<option value="${f.codigo}" ${editing&&editing.codigoFamilia===f.codigo?'selected':''}>${f.responsable} (${f.codigo})</option>`).join('') || '<option value="">No hay familias — cree una primero</option>'}</select></div>
+        <div><label>Nivel académico</label><select id="estNivel">${DB.catalogos.niveles.map(n=>`<option ${editing&&editing.nivel===n?'selected':''}>${n}</option>`).join('')}</select></div>
+        <div><label>Grado / Sección</label><select id="estGrado">${DB.catalogos.grados.map(g=>`<option ${editing&&editing.grado===g?'selected':''}>${g}</option>`).join('')}</select></div>
+        <div><label>Estado</label><select id="estEstado"><option ${editing&&editing.estado==='Activo'?'selected':''}>Activo</option><option ${editing&&editing.estado==='Retirado'?'selected':''}>Retirado</option><option ${editing&&editing.estado==='Graduado'?'selected':''}>Graduado</option></select></div>
+        <div><label>Internado</label><select id="estInternado"><option value="No" ${editing&&editing.internado==='No'?'selected':''}>No</option><option value="Si" ${editing&&editing.internado==='Si'?'selected':''}>Sí</option></select></div>
+        <div><label>Internado — fecha inicio</label><input type="date" id="estIntInicio" value="${editing?editing.internadoInicio:''}"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="estCancel">Cancelar</button>
+        <button class="btn btn-primary" id="estGuardar">${editing?'Guardar cambios':'Crear estudiante'}</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('estCancel').onclick = closeModal;
+  document.getElementById('estGuardar').onclick = async ()=>{
+    const codigo = editing ? editing.codigo : normCode(document.getElementById('estCodigo').value);
+    if (!codigo){ alert('El código de estudiante es obligatorio.'); return; }
+    if (!editing && estudianteByCodigo(codigo)){ alert('Ya existe un estudiante con ese código.'); return; }
+    const familiaSel = document.getElementById('estFamilia').value;
+    if (!familiaSel){ alert('Debe seleccionar o crear una familia primero.'); return; }
+    const data = {
+      codigo, nombre: document.getElementById('estNombre').value.trim(), codigoFamilia: familiaSel,
+      nivel: document.getElementById('estNivel').value, grado: document.getElementById('estGrado').value,
+      internado: document.getElementById('estInternado').value, internadoInicio: document.getElementById('estIntInicio').value, internadoFin: editing?editing.internadoFin:'',
+      estado: document.getElementById('estEstado').value
+    };
+    if (!data.nombre){ alert('El nombre completo es obligatorio.'); return; }
+    if (editing){ Object.assign(editing, data); } else { DB.estudiantes.push(data); }
+    await saveEstudiantes();
+    closeModal(); if (onDone) onDone();
+  };
+}
+
+/* =========================================================================
+   HISTORIAL DE SEGUIMIENTO
+   ========================================================================= */
+function renderHistorial(root){
+  root.innerHTML = `
+    <div class="toolbar">
+      <div class="searchbar"><input id="hSearch" placeholder="Buscar por estudiante…"></div>
+      <div class="field"><label>Responsable</label><select id="hResp"><option value="">Todos</option>${DB.catalogos.responsables.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div class="field"><label>Medio</label><select id="hMedio"><option value="">Todos</option>${DB.catalogos.mediosContacto.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div class="field"><label>Resultado</label><select id="hResultado"><option value="">Todos</option>${DB.catalogos.resultadosGestion.map(r=>`<option>${r}</option>`).join('')}</select></div>
+    </div>
+    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th></tr></thead><tbody id="hBody"></tbody></table></div>
+  `;
+  const draw = ()=>{
+    const q = (document.getElementById('hSearch').value||'').toLowerCase();
+    const resp = document.getElementById('hResp').value, medio = document.getElementById('hMedio').value, resultado = document.getElementById('hResultado').value;
+    let rows = [...DB.seguimientos].sort((a,b)=>b.fecha.localeCompare(a.fecha));
+    if (q) rows = rows.filter(s=>{ const est = estudianteByCodigo(s.codigoEstudiante); return (est&&est.nombre.toLowerCase().includes(q)) || s.codigoEstudiante.toLowerCase().includes(q); });
+    if (resp) rows = rows.filter(s=>s.responsable===resp);
+    if (medio) rows = rows.filter(s=>s.medio===medio);
+    if (resultado) rows = rows.filter(s=>s.resultado===resultado);
+    document.getElementById('hBody').innerHTML = rows.map(s=>{
+      const est = estudianteByCodigo(s.codigoEstudiante);
+      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td></tr>`;
+    }).join('') || `<tr><td colspan="8" class="empty">Sin gestiones registradas.</td></tr>`;
+  };
+  ['hSearch','hResp','hMedio','hResultado'].forEach(id=>{
+    const el = document.getElementById(id); el.addEventListener(id==='hSearch'?'input':'change', draw);
+  });
+  draw();
+}
+
+/* =========================================================================
+   CATÁLOGOS
+   ========================================================================= */
+const CAT_META = [
+  {key:'niveles', label:'Niveles académicos'},
+  {key:'grados', label:'Grados / Secciones'},
+  {key:'actividades', label:'Actividades disponibles'},
+  {key:'estadosCuenta', label:'Estados de cuenta'},
+  {key:'mediosContacto', label:'Medios de contacto'},
+  {key:'resultadosGestion', label:'Resultados de gestión'},
+  {key:'responsables', label:'Responsables de cobro'}
+];
+function renderCatalogos(root){
+  const canEdit = perm('editarCatalogos');
+  root.innerHTML = `${!canEdit?'<div class="note">Su rol tiene acceso de solo lectura a los catálogos. Solo el Administrador puede editarlos.</div>':''}
+    <div class="grid grid-2">
+      ${CAT_META.map(m=>`
+        <div class="card">
+          <h2>${m.label}</h2>
+          <div class="catlist">${DB.catalogos[m.key].map((v,i)=>`<span class="cattag">${v} ${canEdit?`<button data-cat="${m.key}" data-i="${i}">×</button>`:''}</span>`).join('')}</div>
+          ${canEdit?`<div class="addrow"><input placeholder="Agregar nuevo…" data-add="${m.key}"><button class="btn btn-sm" data-addbtn="${m.key}">Agregar</button></div>`:''}
+        </div>`).join('')}
+    </div>`;
+  if (!canEdit) return;
+  root.querySelectorAll('[data-cat]').forEach(btn=>{
+    btn.onclick = async ()=>{ DB.catalogos[btn.dataset.cat].splice(Number(btn.dataset.i),1); await saveCatalogos(); renderCatalogos(root); };
+  });
+  root.querySelectorAll('[data-addbtn]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const input = root.querySelector(`[data-add="${btn.dataset.addbtn}"]`);
+      if (input.value.trim()){ DB.catalogos[btn.dataset.addbtn].push(input.value.trim()); await saveCatalogos(); renderCatalogos(root); }
+    };
+  });
+}
+
+/* =========================================================================
+   USUARIOS Y ROLES (solo Administrador)
+   ========================================================================= */
+function renderUsuarios(root){
+  root.innerHTML = `
+    <div class="card">
+      <h2>Usuarios del sistema</h2>
+      <p class="small">Cada usuario inicia sesión con su <b>correo y contraseña</b>. Roles: <b>Administrador</b> (acceso total), <b>Contable</b> (gestión y reportes, sin catálogos ni usuarios) o <b>Auxiliar</b> (consulta y registro de gestiones propias).</p>
+      <div class="note">Este sistema no tiene servidor de correo, por lo que no puede enviar enlaces de recuperación por email. Cada usuario puede recuperar su propia clave respondiendo su <b>pregunta de seguridad</b> en la pantalla de inicio de sesión. Si la olvida también, un Administrador puede restablecerla aquí manualmente. Tras ${MAX_INTENTOS_FALLIDOS} intentos fallidos, la cuenta se bloquea sola por ${BLOQUEO_MINUTOS} minutos.</div>
+      <div class="tablewrap" style="max-height:360px;">
+        <table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr></thead>
+        <tbody>${DB.usuarios.map((u,i)=>{
+          const bloqueado = u.bloqueadoHasta && new Date(u.bloqueadoHasta) > new Date();
+          return `<tr>
+          <td>${u.nombre}${u.correo===SESSION.correo?' <span class="small">(usted)</span>':''}</td>
+          <td class="mono">${u.correo}</td>
+          <td><select data-ur="${i}" ${u.correo===SESSION.correo?'disabled title="No puede cambiarse su propio rol"':''}>
+            <option value="admin" ${u.rol==='admin'?'selected':''}>Administrador</option>
+            <option value="contable" ${u.rol==='contable'?'selected':''}>Contable</option>
+            <option value="auxiliar" ${u.rol==='auxiliar'?'selected':''}>Auxiliar</option>
+          </select></td>
+          <td>${bloqueado?`<span class="pill-error">Bloqueada</span>`:`<span class="pill-ok">Activa</span>`}</td>
+          <td class="small mono">${u.ultimoAcceso ? new Date(u.ultimoAcceso).toLocaleString('es-DO') : 'Nunca'}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-sm" data-ureset="${i}">Restablecer clave</button>
+            <button class="btn btn-sm btn-danger" data-udel="${i}" ${u.correo===SESSION.correo?'disabled title="No puede eliminar su propia cuenta"':''}>Eliminar</button>
+          </td>
+        </tr>`;}).join('')}</tbody></table>
+      </div>
+      <hr class="sep">
+      <h2>Agregar nuevo usuario</h2>
+      <div class="formgrid" style="max-width:640px;">
+        <div><label>Nombre completo</label><input id="newUserName" placeholder="Nombre y apellido"></div>
+        <div><label>Correo electrónico</label><input id="newUserEmail" type="email" placeholder="nombre@sunegocio.com"></div>
+        <div><label>Rol</label><select id="newUserRole"><option value="admin">Administrador</option><option value="contable" selected>Contable</option><option value="auxiliar">Auxiliar</option></select></div>
+        <div><label>Contraseña inicial</label><input id="newUserPass" type="text" placeholder="Mínimo 6 caracteres"></div>
+        <div><label>Pregunta de seguridad</label><input id="newUserPregunta" placeholder="Ej. ¿Nombre de su primera mascota?"></div>
+        <div><label>Respuesta de seguridad</label><input id="newUserRespuesta" placeholder="Respuesta"></div>
+      </div>
+      <div style="margin-top:12px;"><button class="btn btn-primary" id="addUser">Agregar usuario</button></div>
+    </div>
+  `;
+  root.querySelectorAll('[data-ur]').forEach(sel=> sel.onchange = async ()=>{
+    const u = DB.usuarios[Number(sel.dataset.ur)];
+    const antes = u.rol;
+    u.rol = sel.value; await saveUsuarios();
+    registrarAuditoria('Rol de usuario cambiado', `${u.correo}: ${ROLE_LABEL[antes]} → ${ROLE_LABEL[u.rol]}`);
+    renderUsuarios(root);
+  });
+  root.querySelectorAll('[data-udel]').forEach(btn=> btn.onclick = async ()=>{
+    if (!confirm('¿Eliminar este usuario? Ya no podrá iniciar sesión.')) return;
+    const u = DB.usuarios[Number(btn.dataset.udel)];
+    DB.usuarios.splice(Number(btn.dataset.udel),1); await saveUsuarios();
+    registrarAuditoria('Usuario eliminado', u ? u.correo : '');
+    renderUsuarios(root);
+  });
+  root.querySelectorAll('[data-ureset]').forEach(btn=> btn.onclick = async ()=>{
+    const u = DB.usuarios[Number(btn.dataset.ureset)];
+    const nueva = prompt(`Nueva contraseña temporal para ${u.nombre} (${u.correo}):\n(mínimo 6 caracteres — compártala con la persona por un medio seguro)`);
+    if (!nueva) return;
+    if (nueva.trim().length < 6){ alert('La contraseña debe tener al menos 6 caracteres.'); return; }
+    u.passwordHash = await hashText(nueva.trim());
+    u.intentosFallidos = 0; u.bloqueadoHasta = null;
+    await saveUsuarios();
+    registrarAuditoria('Contraseña restablecida por Administrador', u.correo);
+    alert(`Contraseña restablecida para ${u.nombre}. Compártasela de forma segura.`);
+  });
+  document.getElementById('addUser').onclick = async ()=>{
+    const nombre = document.getElementById('newUserName').value.trim();
+    const correo = document.getElementById('newUserEmail').value.trim().toLowerCase();
+    const rol = document.getElementById('newUserRole').value;
+    const pass = document.getElementById('newUserPass').value;
+    const pregunta = document.getElementById('newUserPregunta').value.trim();
+    const respuesta = document.getElementById('newUserRespuesta').value.trim();
+    if (!nombre || !correo || !pass || !pregunta || !respuesta){ alert('Complete todos los campos.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)){ alert('Ingrese un correo electrónico válido.'); return; }
+    if (DB.usuarios.some(u=>u.correo.toLowerCase()===correo)){ alert('Ya existe un usuario con ese correo.'); return; }
+    if (pass.length < 6){ alert('La contraseña debe tener al menos 6 caracteres.'); return; }
+    DB.usuarios.push({
+      nombre, correo, rol, passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
+      intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:null, creadoEl:new Date().toISOString()
+    });
+    await saveUsuarios();
+    registrarAuditoria('Usuario creado', `${correo} (${ROLE_LABEL[rol]})`);
+    renderUsuarios(root);
+  };
+}
+
+function renderAuditoria(root){
+  root.innerHTML = `
+    <div class="note">Registro de solo lectura: inicios de sesión (éxitos y fallos), bloqueos de cuenta, altas/bajas/cambios de datos, importaciones y restauraciones. Se conservan los últimos 1000 eventos.</div>
+    <div class="toolbar">
+      <div class="searchbar"><input id="audSearch" placeholder="Buscar por usuario, acción o detalle…"></div>
+    </div>
+    <div class="tablewrap" style="max-height:600px;">
+      <table><thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead><tbody id="audBody"></tbody></table>
+    </div>
+  `;
+  const draw = ()=>{
+    const q = (document.getElementById('audSearch').value||'').toLowerCase();
+    let rows = [...DB.auditoria].sort((a,b)=> b.fecha.localeCompare(a.fecha));
+    if (q) rows = rows.filter(r=> (r.usuario||'').toLowerCase().includes(q) || (r.accion||'').toLowerCase().includes(q) || (r.detalle||'').toLowerCase().includes(q));
+    document.getElementById('audBody').innerHTML = rows.slice(0,500).map(r=>`<tr>
+      <td class="mono small">${new Date(r.fecha).toLocaleString('es-DO')}</td>
+      <td class="small">${r.usuario}</td>
+      <td>${r.accion}</td>
+      <td class="small">${r.detalle||''}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="empty">Sin actividad registrada todavía.</td></tr>`;
+  };
+  document.getElementById('audSearch').addEventListener('input', draw);
+  draw();
+}
+
+function renderBaseDeDatos(root){
+  const conectado = STORAGE_MODE === 'supabase';
+  const configurado = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+  root.innerHTML = `
+    <div class="note">
+      Conectar un proyecto de <b>Supabase</b> (gratis) le da a este sistema una base de datos real compartida entre
+      todos los dispositivos, con guardado seguro y verificado. Es opcional — si no lo configura, la app sigue
+      funcionando con Nube de Claude.ai / IndexedDB / localStorage como hasta ahora.
+      Vea <b>ARQUITECTURA_Y_ESCALABILIDAD.md</b> para el paso a paso de crear el proyecto y el script SQL necesario.
+    </div>
+    <div class="card">
+      <h2>Estado actual</h2>
+      <p style="font-weight:700;color:${conectado?'var(--verde)':(configurado?'var(--rojo)':'var(--muted)')};">
+        ${conectado ? '✓ Conectado y activo — este sistema está usando Supabase ahora mismo.' : (configurado ? '✕ Configurado, pero la última verificación falló (revise el diagnóstico en "Respaldo de Datos").' : 'No configurado. La app sigue usando su almacenamiento habitual.')}
+      </p>
+      ${configurado ? `<p class="small mono">${SUPABASE_URL}</p>` : ''}
+    </div>
+    <div class="card">
+      <h2>${configurado ? 'Actualizar conexión' : 'Conectar un proyecto de Supabase'}</h2>
+      <div class="formgrid" style="max-width:640px;">
+        <div class="full"><label>Project URL</label><input id="sbUrl" placeholder="https://xxxxxxxx.supabase.co" value="${SUPABASE_URL||''}"></div>
+        <div class="full"><label>Anon / Public key</label><input id="sbKey" placeholder="eyJhbGciOi..." value="${SUPABASE_ANON_KEY||''}"></div>
+      </div>
+      <div id="sbTestMsg" style="margin-top:10px;"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+        <button class="btn" id="sbProbar">Probar conexión</button>
+        <button class="btn btn-primary" id="sbGuardar">Guardar y activar</button>
+        ${configurado ? `<button class="btn btn-danger" id="sbDesconectar">Desconectar</button>` : ''}
+      </div>
+      <p class="small" style="margin-top:12px;">Antes de conectar, cree su proyecto gratis en <span class="mono">supabase.com</span> y ejecute el script SQL de la tabla <span class="mono">kv_store</span> que aparece en la guía de arquitectura (sección "Ruta recomendada"). La anon key es pública por diseño — está protegida por las reglas de seguridad (RLS) que usted define en Supabase, no es un secreto que deba ocultar del navegador.</p>
+    </div>
+  `;
+  document.getElementById('sbProbar').onclick = async ()=>{
+    const url = document.getElementById('sbUrl').value;
+    const key = document.getElementById('sbKey').value;
+    const msg = document.getElementById('sbTestMsg');
+    msg.innerHTML = `<p class="small">Probando…</p>`;
+    const r = await supabaseProbar(url, key);
+    msg.innerHTML = r.ok
+      ? `<div class="note">✓ Conexión exitosa. La tabla "kv_store" respondió correctamente.</div>`
+      : `<div class="alertbox">${r.error}</div>`;
+  };
+  document.getElementById('sbGuardar').onclick = async ()=>{
+    const url = document.getElementById('sbUrl').value;
+    const key = document.getElementById('sbKey').value;
+    if (!url.trim() || !key.trim()){ alert('Complete el Project URL y la anon key.'); return; }
+    if ((DB.familias.length > 0 || DB.estudiantes.length > 0) && STORAGE_MODE !== 'supabase'){
+      const seguir = confirm(
+        'Ya tiene datos guardados (familias, estudiantes, etc.) en su almacenamiento actual.\n\n' +
+        'Al conectar Supabase, la app empieza a leer y escribir en esa base de datos — que probablemente esté vacía si es un proyecto nuevo. Sus datos actuales NO se mueven solos.\n\n' +
+        'Recomendado: cancele, vaya a "Respaldo de Datos" y exporte un respaldo (.json) ANTES de continuar. Luego conecte Supabase y restaure ese respaldo desde "Respaldo de Datos" para migrar todo de una vez.\n\n' +
+        '¿Desea continuar de todas formas sin exportar primero?'
+      );
+      if (!seguir) return;
+    }
+    const r = await supabaseProbar(url, key);
+    if (!r.ok){
+      if (!confirm('La prueba de conexión falló: ' + r.error + '\n\n¿Guardar de todas formas? (puede corregirlo después)')) return;
+    }
+    await guardarConfigSupabase(url, key);
+    await verificarAlmacenamiento();
+    await recargarDatosDeNegocio();
+    registrarAuditoria('Base de datos Supabase configurada', url);
+    renderAll();
+  };
+  const btnDesc = document.getElementById('sbDesconectar');
+  if (btnDesc) btnDesc.onclick = async ()=>{
+    if (!confirm('¿Desconectar Supabase? La app volverá a usar Nube de Claude.ai / IndexedDB / localStorage — que puede tener datos distintos a los de Supabase. Sus datos en Supabase NO se borran, solo deja de usarlos esta app.')) return;
+    await borrarConfigSupabase();
+    await verificarAlmacenamiento();
+    await recargarDatosDeNegocio();
+    registrarAuditoria('Base de datos Supabase desconectada', '');
+    renderAll();
+  };
+}
+
+function renderRespaldo(root){
+  const modoInfo = {
+    supabase: {titulo:'🐘 Supabase (base de datos real)', color:'var(--verde)', desc:'Conectado a tu propio proyecto de Supabase. Todos los dispositivos que se conecten a este mismo proyecto ven y comparten los mismos datos, de verdad — no depende de Claude.ai ni de este navegador.'},
+    cloud: {titulo:'☁️ Nube compartida de Claude.ai', color:'var(--accent-dark)', desc:'Todo tu equipo ve los mismos datos automáticamente mientras trabajen dentro de este mismo artifact de Claude.ai. No necesitas hacer nada extra.'},
+    indexeddb: {titulo:'🗄️ IndexedDB de este dispositivo', color:'var(--accent-dark)', desc:'Ni Supabase ni la nube de Claude.ai están disponibles, pero se está guardando de forma robusta en IndexedDB (mucha más capacidad y estructura que el almacenamiento simple del navegador). Sigue siendo local a este dispositivo/navegador — otras personas o dispositivos NO ven estos mismos datos.'},
+    local: {titulo:'💾 localStorage de este navegador', color:'var(--amarillo)', desc:'Ni Supabase, ni la nube, ni IndexedDB están disponibles. Se está usando el almacenamiento más simple del navegador (menor capacidad). Local a este dispositivo — otras personas o dispositivos NO ven estos mismos datos.'},
+    memory: {titulo:'⚠️ Sin guardar', color:'var(--rojo)', desc:'Ninguna opción de almacenamiento está disponible. Nada se está guardando: si cierras o recargas la página, perderás los cambios. Exporta un respaldo antes de continuar.'},
+    checking: {titulo:'Verificando…', color:'var(--muted)', desc:'Determinando dónde se están guardando tus datos.'}
+  }[STORAGE_MODE] || {titulo:'Desconocido', color:'var(--muted)', desc:''};
+
+  root.innerHTML = `
+    <div class="card">
+      <h2>Estado del almacenamiento</h2>
+      <p style="font-weight:700;color:${modoInfo.color};margin-bottom:6px;">${modoInfo.titulo}</p>
+      <p class="small">${modoInfo.desc}</p>
+      ${(STORAGE_MODE !== 'cloud' && STORAGE_MODE !== 'supabase') ? `<div class="alertbox">Para uso con varias personas en distintos dispositivos con datos siempre sincronizados, este sistema necesita almacenamiento en la nube (dentro de Claude.ai) o conectarse a Supabase (ver módulo "Base de Datos (Supabase)" y la guía de arquitectura incluida). El modo ${STORAGE_MODE==='indexeddb'?'IndexedDB':'local'} sirve bien para un solo dispositivo/administrador o como respaldo temporal.</div>` : ''}
+      ${STORAGE_DIAG.protocolo === 'file:' ? `<div class="alertbox"><b>Detectamos que abriste este archivo con doble clic (file://).</b> Muchos navegadores bloquean por completo el guardado local en ese modo — es la causa más común de que los datos "no se guarden". Solución: publica este archivo en un hosting real (por ejemplo GitHub Pages) y ábrelo desde ahí (https://...), o úsalo dentro de Claude.ai.</div>` : ''}
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Ver diagnóstico técnico</summary>
+        <div class="tablewrap" style="margin-top:10px;">
+          <table>
+            <tbody>
+              <tr><td class="small">Protocolo de la página</td><td class="mono">${STORAGE_DIAG.protocolo || '—'}</td></tr>
+              <tr><td class="small">¿Se intentó Supabase?</td><td>${STORAGE_DIAG.supabaseIntentado ? (STORAGE_DIAG.supabaseFunciona?'Sí, y funcionó ✓':'Sí, pero falló ✕') : 'No configurado'}</td></tr>
+              <tr><td class="small">¿Se intentó nube (Claude.ai)?</td><td>${STORAGE_DIAG.cloudIntentado ? (STORAGE_DIAG.cloudFunciona?'Sí, y funcionó ✓':'Sí, pero falló ✕') : 'No disponible en este entorno'}</td></tr>
+              <tr><td class="small">¿Se intentó IndexedDB?</td><td>${STORAGE_DIAG.idbIntentado ? (STORAGE_DIAG.idbFunciona?'Sí, y funcionó ✓':'Sí, pero falló ✕') : '—'}</td></tr>
+              <tr><td class="small">¿Se intentó guardado local (localStorage)?</td><td>${STORAGE_DIAG.localIntentado ? (STORAGE_DIAG.localFunciona?'Sí, y funcionó ✓':'Sí, pero falló ✕') : '—'}</td></tr>
+              <tr><td class="small">Detalle técnico</td><td class="small">${STORAGE_DIAG.detalle || '—'}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-sm" id="btnReprobar" style="margin-top:10px;">🔄 Probar guardado ahora</button>
+      </details>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>Exportar respaldo completo</h2>
+        <p class="small">Descarga un archivo con absolutamente todos los datos del sistema (familias, estudiantes, cuentas, abonos, seguimientos, catálogos y usuarios). Guárdalo en un lugar seguro — es tu red de seguridad.</p>
+        <button class="btn btn-primary" id="btnExportar" style="margin-top:10px;">⭳ Descargar respaldo (.json)</button>
+        <p class="small" style="margin-top:10px;">Recomendado: exporta un respaldo al final de cada jornada o antes de hacer una importación masiva.</p>
+      </div>
+      <div class="card">
+        <h2>Restaurar desde un respaldo</h2>
+        <p class="small">Sube un archivo de respaldo previamente exportado. <b>Esto reemplaza todos los datos actuales</b> por los del archivo — úsalo solo si sabes lo que haces.</p>
+        <label class="dropzone" id="dzRestaurar" style="margin-top:10px;">
+          <div>📄 Haga clic para seleccionar el archivo de respaldo (.json)</div>
+          <input type="file" id="fileRestaurar" accept=".json">
+        </label>
+        <div id="restaurarMsg"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Preparar para uso real</h2>
+      <p class="small">Este sistema viene con datos de ejemplo para que pudieras explorarlo. Antes de empezar a usarlo con información real de tu negocio, elimínalos.</p>
+      ${hasDemoData() ? `
+        <div class="note">Se detectaron datos de muestra en el sistema (familias, estudiantes, cuentas, seguimientos y abonos de ejemplo).</div>
+        <button class="btn btn-danger" id="btnLimpiarDemo" style="margin-top:8px;">🗑 Eliminar todos los datos de muestra</button>
+      ` : `<div class="note">✓ No hay datos de muestra en el sistema — solo información real.</div>`}
+    </div>
+
+    <div class="card">
+      <h2>Lista de verificación antes de lanzar</h2>
+      <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink);line-height:2;">
+        <li>Eliminar los datos de muestra (arriba en esta misma pantalla).</li>
+        <li>Crear los usuarios reales de tu equipo en "Usuarios y Roles" y darles su correo, contraseña y pregunta de seguridad.</li>
+        <li>Revisar los "Catálogos" (niveles, grados, actividades, responsables) y ajustarlos a tu institución.</li>
+        <li>Importar tus Familias y Estudiantes reales desde Excel/CSV.</li>
+        <li>Importar el primer Reporte Mensual real de cuentas críticas.</li>
+        <li>Descargar un respaldo (.json) una vez cargados los datos reales.</li>
+        <li>Si varias personas usarán el sistema desde distintos dispositivos, verificar que el badge de arriba diga <b>"Nube compartida"</b> — si dice "Solo este navegador", cada quien vería datos distintos.</li>
+      </ul>
+    </div>
+  `;
+  document.getElementById('btnExportar').onclick = exportBackup;
+  const btnReprobar = document.getElementById('btnReprobar');
+  if (btnReprobar) btnReprobar.onclick = async ()=>{
+    btnReprobar.textContent = 'Probando…';
+    await verificarAlmacenamiento();
+    await recargarDatosDeNegocio();
+    renderAll();
+  };
+  const btnLimpiar = document.getElementById('btnLimpiarDemo');
+  if (btnLimpiar) btnLimpiar.onclick = async ()=>{
+    if (!confirm('¿Eliminar todos los datos de muestra? Esta acción no se puede deshacer. Los datos reales que ya hayas cargado no se verán afectados.')) return;
+    await eliminarDatosDemo();
+    renderRespaldo(root);
+  };
+  document.getElementById('fileRestaurar').onchange = (e)=>{
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('Esto reemplazará TODOS los datos actuales por los del archivo de respaldo. ¿Continuar?')) { e.target.value=''; return; }
+    importBackupFile(file, ()=>{
+      document.getElementById('restaurarMsg').innerHTML = `<div class="note" style="margin-top:10px;">Respaldo restaurado correctamente.</div>`;
+      renderAll();
+    }, (err)=>{
+      document.getElementById('restaurarMsg').innerHTML = `<div class="alertbox" style="margin-top:10px;">No se pudo restaurar: ${err.message}</div>`;
+    });
+  };
+}
+
+/* =========================================================================
+   AUTENTICACIÓN — LOGIN OBLIGATORIO, BLOQUEO POR INTENTOS FALLIDOS,
+   ASISTENTE DE PRIMER USO Y CIERRE DE SESIÓN POR INACTIVIDAD
+   ========================================================================= */
+const MAX_INTENTOS_FALLIDOS = 5;
+const BLOQUEO_MINUTOS = 5;
+const INACTIVIDAD_MINUTOS = 30;
+let loginState = { step:'login', error:'', ok:'', pendingUser:null };
+let idleTimer = null;
+
+function iniciarControlDeInactividad(){
+  const resetTimer = ()=>{
+    if (idleTimer) clearTimeout(idleTimer);
+    if (!SESSION.authenticated) return;
+    idleTimer = setTimeout(()=>{
+      registrarAuditoria('Cierre de sesión automático', 'Por inactividad (' + INACTIVIDAD_MINUTOS + ' min)');
+      cerrarSesion('Su sesión se cerró automáticamente por inactividad (' + INACTIVIDAD_MINUTOS + ' minutos). Vuelva a iniciar sesión.');
+    }, INACTIVIDAD_MINUTOS * 60 * 1000);
+  };
+  ['click','keydown','mousemove','scroll'].forEach(ev=> document.addEventListener(ev, resetTimer, {passive:true}));
+  resetTimer();
+}
+
+function cerrarSesion(mensaje){
+  if (SESSION.authenticated) registrarAuditoria('Cierre de sesión', SESSION.correo||SESSION.usuario||'');
+  SESSION = { usuario:null, rol:null, correo:null, authenticated:false };
+  currentView = 'dashboard';
+  loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok: mensaje||'', pendingUser:null };
+  document.querySelector('.app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  renderLogin();
+}
+
+async function eliminarTodosLosUsuarios(){
+  const ok = confirm('Esto eliminará TODAS las cuentas de usuario actuales. La próxima vez que se abra la app, se pedirá crear una nueva cuenta de Administrador desde cero.\n\n¿Desea continuar?');
+  if (!ok) return;
+  DB.usuarios = [];
+  await saveUsuarios();
+  registrarAuditoria('Reinicio de usuarios', 'Se eliminaron todas las cuentas desde la pantalla de acceso.');
+  loginState = { step:'setup-admin', error:'', ok:'', pendingUser:null };
+  renderLogin();
+}
+
+function renderLogin(){
+  const box = document.getElementById('loginScreen');
+  const s = loginState;
+  const shell = (inner)=>`
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-mark">CC</div>
+        <div><div>Cuentas Críticas</div><div>Gestión de Cobros — Dirección</div></div>
+      </div>
+      ${inner}
+    </div>`;
+
+  /* ---------- Asistente de primer uso: crear el Administrador real ---------- */
+  if (s.step === 'setup-admin'){
+    box.innerHTML = shell(`
+      <h2>Configuración inicial</h2>
+      <p class="sub">Todavía no hay ninguna cuenta creada. Cree la cuenta del <b>Administrador</b> — será quien pueda crear al resto del equipo después.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      <div class="login-field"><label>Nombre completo</label><input type="text" id="suNombre" placeholder="Nombre y apellido"></div>
+      <div class="login-field"><label>Correo electrónico</label><input type="email" id="suCorreo" placeholder="nombre@sunegocio.com"></div>
+      <div class="login-field"><label>Contraseña</label><input type="password" id="suPass" placeholder="Mínimo 6 caracteres"></div>
+      <div class="login-field"><label>Confirmar contraseña</label><input type="password" id="suPass2" placeholder="Repita la contraseña"></div>
+      <div class="login-field"><label>Pregunta de seguridad</label><input type="text" id="suPregunta" placeholder="Ej. ¿Nombre de su primera mascota?"></div>
+      <div class="login-field"><label>Respuesta de seguridad</label><input type="text" id="suRespuesta" placeholder="Respuesta"></div>
+      <div class="login-actions"><button class="btn btn-primary" id="suSubmit">Crear cuenta e ingresar</button></div>
+      <div class="login-note">Esta será la única cuenta con acceso total al inicio. Desde "Usuarios y Roles" podrá crear las demás cuentas del equipo (Contable, Auxiliar) una vez adentro.</div>
+    `);
+    document.getElementById('suSubmit').onclick = async ()=>{
+      const nombre = document.getElementById('suNombre').value.trim();
+      const correo = document.getElementById('suCorreo').value.trim().toLowerCase();
+      const pass = document.getElementById('suPass').value;
+      const pass2 = document.getElementById('suPass2').value;
+      const pregunta = document.getElementById('suPregunta').value.trim();
+      const respuesta = document.getElementById('suRespuesta').value.trim();
+      if (!nombre || !correo || !pass || !pregunta || !respuesta){ loginState.error='Complete todos los campos.'; renderLogin(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)){ loginState.error='Ingrese un correo electrónico válido.'; renderLogin(); return; }
+      if (pass.length < 6){ loginState.error='La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
+      if (pass !== pass2){ loginState.error='Las contraseñas no coinciden.'; renderLogin(); return; }
+      const nuevoAdmin = {
+        nombre, correo, rol:'admin', passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
+        intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:new Date().toISOString(), creadoEl:new Date().toISOString()
+      };
+      DB.usuarios.push(nuevoAdmin);
+      await saveUsuarios();
+      registrarAuditoria('Configuración inicial', 'Cuenta de Administrador creada: ' + correo);
+      SESSION = { usuario:nuevoAdmin.nombre, rol:'admin', correo:nuevoAdmin.correo, authenticated:true };
+      loginState = { step:'login', error:'', ok:'', pendingUser:null };
+      document.getElementById('loginScreen').style.display = 'none';
+      document.querySelector('.app').style.display = 'grid';
+      currentView = 'dashboard';
+      renderAll();
+      iniciarControlDeInactividad();
+    };
+    return;
+  }
+
+  if (s.step === 'login'){
+    box.innerHTML = shell(`
+      <h2>Iniciar sesión</h2>
+      <p class="sub">Ingrese con su correo y contraseña.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      ${s.ok?`<div class="login-ok">${s.ok}</div>`:''}
+      <div class="login-field"><label>Correo electrónico</label><input type="email" id="loEmail" placeholder="nombre@sunegocio.com" autocomplete="username"></div>
+      <div class="login-field"><label>Contraseña</label><input type="password" id="loPass" placeholder="••••••••" autocomplete="current-password"></div>
+      <div class="login-actions"><button class="btn btn-primary" id="loSubmit">Ingresar</button></div>
+      <div class="login-link" id="loForgot">¿Olvidó su contraseña?</div>
+      <div class="login-note">La clave se recupera respondiendo su pregunta de seguridad. Este sistema no envía correos reales (no cuenta con servidor de correo).</div>
+      <div class="login-link" id="loFactoryReset" style="color:var(--rojo);margin-top:10px;">¿Perdió el acceso a todas las cuentas? Reiniciar usuarios</div>
+    `);
+    const submit = async ()=>{
+      const email = (document.getElementById('loEmail').value||'').trim().toLowerCase();
+      const pass = document.getElementById('loPass').value||'';
+      if (!email || !pass){ loginState.error = 'Ingrese correo y contraseña.'; loginState.ok=''; renderLogin(); return; }
+      const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
+      if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; loginState.ok=''; renderLogin(); return; }
+
+      if (user.bloqueadoHasta && new Date(user.bloqueadoHasta) > new Date()){
+        const minutosRestantes = Math.ceil((new Date(user.bloqueadoHasta) - new Date())/60000);
+        loginState.error = `Esta cuenta está bloqueada temporalmente por demasiados intentos fallidos. Intente de nuevo en ${minutosRestantes} minuto(s), o recupere su clave con la pregunta de seguridad.`;
+        loginState.ok=''; renderLogin(); return;
+      }
+
+      const hash = await hashText(pass);
+      if (hash !== user.passwordHash){
+        user.intentosFallidos = (user.intentosFallidos||0) + 1;
+        let msg = 'Contraseña incorrecta.';
+        if (user.intentosFallidos >= MAX_INTENTOS_FALLIDOS){
+          user.bloqueadoHasta = new Date(Date.now() + BLOQUEO_MINUTOS*60000).toISOString();
+          user.intentosFallidos = 0;
+          msg = `Demasiados intentos fallidos. Esta cuenta quedó bloqueada por ${BLOQUEO_MINUTOS} minutos.`;
+          registrarAuditoria('Cuenta bloqueada', email + ' — ' + MAX_INTENTOS_FALLIDOS + ' intentos fallidos');
+        } else {
+          registrarAuditoria('Intento de acceso fallido', email + ` (intento ${user.intentosFallidos}/${MAX_INTENTOS_FALLIDOS})`);
+        }
+        await saveUsuarios();
+        loginState.error = msg; loginState.ok=''; renderLogin(); return;
+      }
+
+      user.intentosFallidos = 0; user.bloqueadoHasta = null; user.ultimoAcceso = new Date().toISOString();
+      await saveUsuarios();
+      registrarAuditoria('Inicio de sesión', user.correo);
+      SESSION = { usuario:user.nombre, rol:user.rol, correo:user.correo, authenticated:true };
+      loginState = { step:'login', error:'', ok:'', pendingUser:null };
+      document.getElementById('loginScreen').style.display = 'none';
+      document.querySelector('.app').style.display = 'grid';
+      currentView = 'dashboard';
+      renderAll();
+      iniciarControlDeInactividad();
+    };
+    document.getElementById('loSubmit').onclick = submit;
+    box.querySelectorAll('input').forEach(inp=> inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
+    document.getElementById('loForgot').onclick = ()=>{ loginState = {step:'forgot-email', error:'', ok:'', pendingUser:null}; renderLogin(); };
+    document.getElementById('loFactoryReset').onclick = eliminarTodosLosUsuarios;
+  }
+
+  else if (s.step === 'forgot-email'){
+    box.innerHTML = shell(`
+      <span class="login-back" id="loBack">← Volver a iniciar sesión</span>
+      <h2>Recuperar contraseña</h2>
+      <p class="sub">Ingrese su correo para ver su pregunta de seguridad.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      <div class="login-field"><label>Correo electrónico</label><input type="email" id="frEmail" placeholder="nombre@sunegocio.com"></div>
+      <div class="login-actions"><button class="btn btn-primary" id="frSubmit">Continuar</button></div>
+    `);
+    document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
+    document.getElementById('frSubmit').onclick = ()=>{
+      const email = (document.getElementById('frEmail').value||'').trim().toLowerCase();
+      const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
+      if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; renderLogin(); return; }
+      loginState = { step:'forgot-question', error:'', ok:'', pendingUser:user };
+      renderLogin();
+    };
+  }
+
+  else if (s.step === 'forgot-question'){
+    const user = s.pendingUser;
+    box.innerHTML = shell(`
+      <span class="login-back" id="loBack">← Volver a iniciar sesión</span>
+      <h2>Pregunta de seguridad</h2>
+      <p class="sub">Responda la pregunta configurada para <b>${user.correo}</b>.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      <div class="login-field"><label>${user.pregunta}</label><input type="text" id="frResp" placeholder="Su respuesta"></div>
+      <div class="login-actions"><button class="btn btn-primary" id="frCheck">Verificar respuesta</button></div>
+    `);
+    document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
+    document.getElementById('frCheck').onclick = async ()=>{
+      const resp = document.getElementById('frResp').value||'';
+      const hash = await hashText(resp);
+      if (hash !== user.respuestaHash){ loginState.error = 'La respuesta no coincide. Intente de nuevo o pida a un Administrador que restablezca su clave.'; renderLogin(); return; }
+      loginState = { step:'forgot-reset', error:'', ok:'', pendingUser:user };
+      renderLogin();
+    };
+  }
+
+  else if (s.step === 'forgot-reset'){
+    const user = s.pendingUser;
+    box.innerHTML = shell(`
+      <h2>Nueva contraseña</h2>
+      <p class="sub">Cree una nueva contraseña para <b>${user.correo}</b>. Al guardarla entrará directo al sistema.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      <div class="login-field"><label>Nueva contraseña</label><input type="password" id="frNewPass" placeholder="Mínimo 6 caracteres"></div>
+      <div class="login-field"><label>Confirmar contraseña</label><input type="password" id="frNewPass2" placeholder="Repita la contraseña"></div>
+      <div class="login-actions"><button class="btn btn-primary" id="frSave">Guardar y entrar</button></div>
+    `);
+    document.getElementById('frSave').onclick = async ()=>{
+      const p1 = document.getElementById('frNewPass').value||'';
+      const p2 = document.getElementById('frNewPass2').value||'';
+      if (p1.length < 6){ loginState.error = 'La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
+      if (p1 !== p2){ loginState.error = 'Las contraseñas no coinciden.'; renderLogin(); return; }
+      user.passwordHash = await hashText(p1);
+      user.intentosFallidos = 0; user.bloqueadoHasta = null; user.ultimoAcceso = new Date().toISOString();
+      await saveUsuarios();
+      registrarAuditoria('Recuperación de contraseña', user.correo);
+      SESSION = { usuario:user.nombre, rol:user.rol, correo:user.correo, authenticated:true };
+      loginState = { step:'login', error:'', ok:'', pendingUser:null };
+      document.getElementById('loginScreen').style.display = 'none';
+      document.querySelector('.app').style.display = 'grid';
+      currentView = 'dashboard';
+      renderAll();
+      iniciarControlDeInactividad();
+    };
+  }
+}
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+(async function init(){
+  try{
+    await loadAll();
+    document.querySelector('.app').style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'flex';
+    loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'', pendingUser:null };
+    renderLogin();
+  }catch(err){
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('loginScreen').innerHTML = `
+      <div class="login-card">
+        <div class="login-brand"><div class="brand-mark">CC</div><div><div>Cuentas Críticas</div><div>Gestión de Cobros — Dirección</div></div></div>
+        <h2>No se pudo iniciar la aplicación</h2>
+        <div class="login-error">Ocurrió un error al cargar los datos: ${err.message||err}</div>
+        <p class="sub">Intente recargar esta página. Si el problema persiste, avísele al equipo que preparó esta herramienta.</p>
+      </div>`;
+  }
+})();
+</script>
+</body>
+</html>

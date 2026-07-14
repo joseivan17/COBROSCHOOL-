@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cuentas Críticas — Gestión de cobros y cuentas por cobrar</title>
+<meta name="description" content="Centraliza el seguimiento de cuentas críticas por cobrar: importa tus datos, da seguimiento, registra abonos con fecha y visualiza el balance pendiente en tiempo real.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0f2138;
+  --ink-2:#16324f;
+  --paper:#eef2f6;
+  --card:#ffffff;
+  --line:#dde3ea;
+  --muted:#5b6b81;
+  --teal:#0e7c7b;
+  --teal-dark:#0a5f5e;
+  --teal-light:#e3f3f2;
+  --verde:#2e7d32; --verde-bg:#e8f5e9;
+  --amarillo:#b8860b; --amarillo-bg:#fff6d9;
+  --naranja:#c15a0e; --naranja-bg:#ffe9d9;
+  --rojo:#c62828; --rojo-bg:#fdebea;
+  --font-display:'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body:'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  --maxw:1180px;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto;} *{animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important;} }
+body{margin:0;font-family:var(--font-body);color:var(--ink);background:var(--paper);line-height:1.55;-webkit-font-smoothing:antialiased;}
+h1,h2,h3{font-family:var(--font-display);color:var(--ink);margin:0;letter-spacing:-0.01em;}
+p{margin:0;}
+a{color:inherit;}
+:focus-visible{outline:2.5px solid var(--teal); outline-offset:3px; border-radius:4px;}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px;}
+.mono{font-family:var(--font-mono);}
+img,svg{display:block;}
+
+/* ---------- reveal on scroll ---------- */
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .6s ease, transform .6s ease;}
+.reveal.in{opacity:1;transform:translateY(0);}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 24px;border-radius:10px;font-family:var(--font-body);font-weight:600;font-size:14.5px;text-decoration:none;cursor:pointer;border:1.5px solid transparent;transition:transform .15s ease, background .15s ease, border-color .15s ease;}
+.btn:hover{transform:translateY(-1px);}
+.btn-primary{background:var(--teal);color:#fff;}
+.btn-primary:hover{background:var(--teal-dark);}
+.btn-outline{background:transparent;border-color:var(--line);color:var(--ink);}
+.btn-outline:hover{border-color:var(--teal);color:var(--teal-dark);}
+.btn-light{background:#fff;color:var(--ink);}
+.btn-light:hover{background:var(--teal-light);}
+
+/* ---------- header ---------- */
+header.site{position:sticky;top:0;z-index:40;background:rgba(238,242,246,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;max-width:var(--maxw);margin:0 auto;}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--teal),var(--teal-dark));display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-weight:600;color:#fff;font-size:14px;flex:none;}
+.brand-name{font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--ink);}
+.navlinks{display:flex;align-items:center;gap:30px;}
+.navlinks a{font-size:14px;font-weight:500;color:var(--muted);text-decoration:none;}
+.navlinks a:hover{color:var(--ink);}
+.nav-cta{display:flex;align-items:center;gap:14px;}
+.navlinks-mobile-toggle{display:none;}
+@media (max-width:860px){
+  .navlinks{display:none;}
+}
+
+/* ---------- hero ---------- */
+.hero{padding:76px 0 60px;}
+.hero-grid{display:grid;grid-template-columns:1.05fr 0.95fr;gap:56px;align-items:center;}
+@media (max-width:960px){ .hero-grid{grid-template-columns:1fr;} }
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-dark);background:var(--teal-light);border:1px solid #c7e6e4;padding:6px 12px;border-radius:20px;margin-bottom:20px;}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--rojo);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+h1.hero-h{font-size:44px;line-height:1.12;font-weight:700;max-width:620px;}
+h1.hero-h .accent{color:var(--teal-dark);}
+.hero-sub{margin-top:20px;font-size:17px;color:var(--muted);max-width:520px;line-height:1.65;}
+.hero-ctas{display:flex;gap:14px;margin-top:32px;flex-wrap:wrap;}
+.hero-trust{margin-top:28px;font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:10px;}
+.hero-trust .sep{width:4px;height:4px;border-radius:50%;background:var(--line);}
+
+/* ---------- signature: franja de mora ---------- */
+.ledger-card{background:var(--ink);border-radius:18px;padding:26px 24px 22px;box-shadow:0 30px 60px -20px rgba(15,33,56,.45);}
+.ledger-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px;}
+.ledger-title{color:#cdd9e6;font-size:12px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em;}
+.ledger-est{color:#fff;font-family:var(--font-display);font-weight:600;font-size:14.5px;}
+.strip{display:grid;grid-template-columns:repeat(11,1fr);gap:5px;margin-bottom:20px;}
+.chip{aspect-ratio:1;border-radius:6px;background:#1e3f63;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:9.5px;color:#7f93ab;transition:background .5s ease, color .5s ease, transform .4s ease;}
+.chip.lit-verde{background:var(--verde);color:#fff;}
+.chip.lit-amarillo{background:var(--amarillo);color:#fff;}
+.chip.lit-naranja{background:var(--naranja);color:#fff;}
+.chip.lit-rojo{background:var(--rojo);color:#fff;transform:scale(1.08);}
+.ledger-balance-row{display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid rgba(255,255,255,.1);padding-top:16px;}
+.ledger-label{color:#8fa3ba;font-size:11px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+.ledger-amount{color:#fff;font-family:var(--font-mono);font-size:26px;font-weight:600;transition:color .4s ease;}
+.ledger-amount.paid-flash{color:#7fd9a8;}
+.ledger-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.08);color:#cdd9e6;font-family:var(--font-mono);font-size:11px;padding:5px 10px;border-radius:20px;}
+.ledger-badge .d{width:7px;height:7px;border-radius:50%;background:var(--verde);}
+.ledger-note{margin-top:14px;font-size:11.5px;color:#7f93ab;}
+
+/* ---------- section shell ---------- */
+section{padding:74px 0;}
+.section-head{max-width:640px;margin-bottom:44px;}
+.section-eyebrow{font-family:var(--font-mono);font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-dark);margin-bottom:12px;display:block;}
+.section-head h2{font-size:30px;line-height:1.25;}
+.section-head p{margin-top:14px;color:var(--muted);font-size:15.5px;}
+
+/* ---------- problem ---------- */
+.problem{background:var(--ink);color:#e7ecf2;}
+.problem .section-head h2{color:#fff;}
+.problem .section-head p{color:#a9b8c9;}
+.problem .section-eyebrow{color:#6fd6d4;}
+.pain-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;}
+@media (max-width:720px){ .pain-grid{grid-template-columns:1fr;} }
+.pain{background:var(--ink-2);padding:26px 26px;}
+.pain .mark{font-family:var(--font-mono);color:#5f96c9;font-size:12px;margin-bottom:10px;display:block;}
+.pain p{color:#dbe4ee;font-size:15px;}
+
+/* ---------- features ---------- */
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+@media (max-width:900px){ .feat-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:600px){ .feat-grid{grid-template-columns:1fr;} }
+.feat-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 22px;transition:transform .2s ease, border-color .2s ease, box-shadow .2s ease;}
+.feat-card:hover{transform:translateY(-3px);border-color:#c7e0de;box-shadow:0 16px 32px -18px rgba(15,33,56,.2);}
+.feat-icon{width:40px;height:40px;border-radius:10px;background:var(--teal-light);color:var(--teal-dark);display:flex;align-items:center;justify-content:center;margin-bottom:16px;}
+.feat-card h3{font-size:16px;margin-bottom:8px;}
+.feat-card p{color:var(--muted);font-size:14px;line-height:1.55;}
+
+/* ---------- how it works ---------- */
+.how{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.how-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;position:relative;}
+@media (max-width:900px){ .how-steps{grid-template-columns:1fr 1fr;row-gap:36px;} }
+@media (max-width:560px){ .how-steps{grid-template-columns:1fr;} }
+.how-step{padding-right:24px;position:relative;}
+.how-num{font-family:var(--font-mono);font-size:13px;color:var(--teal-dark);background:var(--teal-light);width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-weight:600;}
+.how-step h3{font-size:16px;margin-bottom:8px;}
+.how-step p{color:var(--muted);font-size:14px;}
+.how-arrow{position:absolute;top:15px;right:-4px;color:var(--line);font-size:20px;}
+@media (max-width:900px){ .how-arrow{display:none;} }
+
+/* ---------- industries ---------- */
+.industries .section-head{margin-bottom:32px;}
+.chip-row{display:flex;flex-wrap:wrap;gap:12px;}
+.industry-chip{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;font-size:14px;font-weight:500;}
+.industry-chip .sq{width:9px;height:9px;border-radius:2px;flex:none;}
+.industries-note{margin-top:28px;font-size:14px;color:var(--muted);max-width:640px;}
+
+/* ---------- cta band ---------- */
+.cta-band{background:linear-gradient(120deg,var(--ink),var(--ink-2));color:#fff;border-radius:20px;max-width:var(--maxw);margin:0 auto;padding:52px 48px;display:flex;justify-content:space-between;align-items:center;gap:30px;flex-wrap:wrap;}
+.cta-band h2{color:#fff;font-size:26px;max-width:440px;}
+.cta-band p{color:#a9b8c9;margin-top:10px;font-size:14.5px;}
+
+/* ---------- contact ---------- */
+.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:48px;}
+@media (max-width:900px){ .contact-grid{grid-template-columns:1fr;} }
+.contact-info-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:30px;}
+.contact-row{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line);}
+.contact-row:last-child{border-bottom:none;}
+.contact-row .ic{width:38px;height:38px;border-radius:9px;background:var(--teal-light);color:var(--teal-dark);display:flex;align-items:center;justify-content:center;flex:none;}
+.contact-row .label{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;}
+.contact-row .val{font-size:14.5px;font-weight:500;}
+.contact-row a.val{text-decoration:none;color:var(--ink);}
+.contact-row a.val:hover{color:var(--teal-dark);}
+
+form.contact-form{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:30px;}
+.f-field{margin-bottom:16px;}
+.f-field label{display:block;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;font-weight:600;}
+.f-field input, .f-field textarea{width:100%;border:1.5px solid var(--line);border-radius:9px;padding:11px 13px;font-family:var(--font-body);font-size:14px;background:#fbfcfe;transition:border-color .15s ease;}
+.f-field input:focus, .f-field textarea:focus{border-color:var(--teal);outline:none;}
+.f-field textarea{min-height:100px;resize:vertical;}
+.f-row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media (max-width:520px){ .f-row2{grid-template-columns:1fr;} }
+.form-msg{margin-top:14px;font-size:13.5px;padding:10px 14px;border-radius:8px;display:none;}
+.form-msg.show{display:block;}
+.form-msg.ok{background:var(--verde-bg);color:var(--verde);}
+.required-note{font-size:12px;color:var(--muted);margin-top:4px;}
+
+/* ---------- footer ---------- */
+footer{background:var(--ink);color:#a9b8c9;padding:50px 0 26px;}
+.foot-top{display:flex;justify-content:space-between;flex-wrap:wrap;gap:30px;padding-bottom:34px;border-bottom:1px solid rgba(255,255,255,.1);}
+.foot-brand .brand-name{color:#fff;}
+.foot-brand p{margin-top:10px;font-size:13px;color:#8fa3ba;max-width:280px;}
+.foot-links{display:flex;gap:56px;flex-wrap:wrap;}
+.foot-col h4{font-family:var(--font-body);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#7f93ab;margin-bottom:14px;font-weight:600;}
+.foot-col a{display:block;font-size:13.5px;color:#c3d0dd;text-decoration:none;margin-bottom:10px;}
+.foot-col a:hover{color:#fff;}
+.foot-bottom{display:flex;justify-content:space-between;padding-top:22px;font-size:12.5px;color:#6f84a0;flex-wrap:wrap;gap:10px;}
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="nav">
+    <a href="#top" class="brand">
+      <div class="brand-mark">CC</div>
+      <span class="brand-name">Cuentas Críticas</span>
+    </a>
+    <nav class="navlinks">
+      <a href="#caracteristicas">Características</a>
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#industrias">Para tu negocio</a>
+      <a href="#contacto">Contáctanos</a>
+    </nav>
+    <div class="nav-cta">
+      <a href="#contacto" class="btn btn-primary">Solicitar demo</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="reveal in">
+        <span class="eyebrow"><span class="dot"></span> GESTIÓN DE CUENTAS POR COBRAR</span>
+        <h1 class="hero-h">La mora de tu negocio, <span class="accent">visible de un vistazo</span> — y bajo control.</h1>
+        <p class="hero-sub">Centraliza el seguimiento de cuentas críticas: importa tus datos desde Excel, da seguimiento a cada cliente, registra abonos con fecha y mira el balance pendiente actualizarse solo.</p>
+        <div class="hero-ctas">
+          <a href="#contacto" class="btn btn-primary">Solicitar una demo</a>
+          <a href="#caracteristicas" class="btn btn-outline">Ver características</a>
+        </div>
+        <div class="hero-trust">
+          <span>Sin instalación</span><span class="sep"></span>
+          <span>Roles y permisos por usuario</span><span class="sep"></span>
+          <span>Importa desde Excel/CSV</span>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="ledger-card">
+          <div class="ledger-top">
+            <span class="ledger-title">Ciclo de seguimiento · Sept—Jul</span>
+            <span class="ledger-est">Cuenta #EST-0417</span>
+          </div>
+          <div class="strip" id="mesesStrip">
+            <div class="chip">SEP</div><div class="chip">OCT</div><div class="chip">NOV</div><div class="chip">DIC</div>
+            <div class="chip">ENE</div><div class="chip">FEB</div><div class="chip">MAR</div><div class="chip">ABR</div>
+            <div class="chip">MAY</div><div class="chip">JUN</div><div class="chip">JUL</div>
+          </div>
+          <div class="ledger-balance-row">
+            <div>
+              <div class="ledger-label">Balance pendiente</div>
+              <div class="ledger-amount mono" id="ledgerAmount">RD$ 48,000</div>
+            </div>
+            <span class="ledger-badge" id="ledgerBadge"><span class="d"></span> 6 meses o más</span>
+          </div>
+          <p class="ledger-note" id="ledgerNote">Simulación: así se ve una cuenta al acumular meses de mora y recibir un abono.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEMA -->
+  <section class="problem">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="section-eyebrow">El mismo problema, en cualquier rubro</span>
+        <h2>El Excel disperso siempre termina así.</h2>
+        <p>No importa si cobras colegiaturas, membresías o cuotas de servicio: sin un sistema centralizado, la mora se vuelve invisible hasta que ya es un problema grande.</p>
+      </div>
+      <div class="pain-grid reveal">
+        <div class="pain"><span class="mark mono">→</span><p>Hojas de Excel que nadie actualiza a tiempo, con versiones distintas circulando por correo.</p></div>
+        <div class="pain"><span class="mark mono">→</span><p>Nadie sabe con certeza quién le dio seguimiento a quién, ni cuándo, ni con qué resultado.</p></div>
+        <div class="pain"><span class="mark mono">→</span><p>El balance real se pierde entre abonos parciales, pagos atrasados y reportes de meses viejos.</p></div>
+        <div class="pain"><span class="mark mono">→</span><p>Dirección no tiene una vista clara de cuánto dinero está atrapado en cuentas sin regularizar.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CARACTERÍSTICAS -->
+  <section id="caracteristicas">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="section-eyebrow">Características</span>
+        <h2>Todo lo que necesitas para dar seguimiento a la mora, en un solo lugar.</h2>
+        <p>Cada función nace de un problema real de cobranza — no hay módulos de más.</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
+          </div>
+          <h3>Dashboard con semáforo</h3>
+          <p>Ve en segundos cuántas cuentas llevan 3, 4 o 6+ meses de mora, con un código de colores que no deja lugar a dudas.</p>
+        </div>
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0-12 4 4m-4-4-4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          </div>
+          <h3>Importación desde Excel/CSV</h3>
+          <p>Sube tu reporte mensual con una plantilla lista para usar. El sistema valida los datos antes de confirmar la carga.</p>
+        </div>
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12.5 11 15l4.5-5.5"/></svg>
+          </div>
+          <h3>Abonos con fecha</h3>
+          <p>Registra cada pago parcial con su fecha exacta. El balance pendiente se recalcula solo, sin fórmulas manuales.</p>
+        </div>
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3>Roles y permisos</h3>
+          <p>Administrador, Contable y Auxiliar: cada quien ve y edita solo lo que le corresponde a su función.</p>
+        </div>
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          </div>
+          <h3>Historial de seguimiento</h3>
+          <p>Cada llamada, WhatsApp, correo o visita queda registrado en una línea de tiempo por cliente.</p>
+        </div>
+        <div class="feat-card reveal">
+          <div class="feat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg>
+          </div>
+          <h3>Fichas completas</h3>
+          <p>Balance mes a mes, actividades, contactos y abonos: todo en una sola ficha por cliente o familia.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CÓMO FUNCIONA -->
+  <section class="how" id="como-funciona">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="section-eyebrow">Cómo funciona</span>
+        <h2>De la hoja de Excel al control total, en cuatro pasos.</h2>
+      </div>
+      <div class="how-steps reveal">
+        <div class="how-step">
+          <div class="how-num">1</div>
+          <h3>Importa tus datos</h3>
+          <p>Sube tu Excel actual con la plantilla incluida, o créalos directamente dentro de la app.</p>
+          <span class="how-arrow">→</span>
+        </div>
+        <div class="how-step">
+          <div class="how-num">2</div>
+          <h3>Da seguimiento</h3>
+          <p>Registra cada llamada, correo o visita, con su resultado y la próxima fecha de contacto.</p>
+          <span class="how-arrow">→</span>
+        </div>
+        <div class="how-step">
+          <div class="how-num">3</div>
+          <h3>Registra los abonos</h3>
+          <p>Anota cada pago parcial con su fecha. El balance pendiente se actualiza automáticamente.</p>
+          <span class="how-arrow">→</span>
+        </div>
+        <div class="how-step">
+          <div class="how-num">4</div>
+          <h3>Visualiza todo</h3>
+          <p>Dirección revisa el dashboard, las alertas y exporta reportes filtrados, en tiempo real.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INDUSTRIAS -->
+  <section class="industries" id="industrias">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="section-eyebrow">Para tu negocio</span>
+        <h2>Un mismo sistema, cualquier cuenta por cobrar recurrente.</h2>
+        <p>Los catálogos, niveles y campos se adaptan al vocabulario de tu negocio — no tienes que forzar tus datos en un molde ajeno.</p>
+      </div>
+      <div class="chip-row reveal">
+        <div class="industry-chip"><span class="sq" style="background:var(--verde)"></span>Colegios y universidades</div>
+        <div class="industry-chip"><span class="sq" style="background:var(--amarillo)"></span>Clínicas y consultorios</div>
+        <div class="industry-chip"><span class="sq" style="background:var(--naranja)"></span>Gimnasios y membresías</div>
+        <div class="industry-chip"><span class="sq" style="background:var(--rojo)"></span>Cooperativas y asociaciones</div>
+        <div class="industry-chip"><span class="sq" style="background:var(--teal)"></span>Servicios profesionales</div>
+      </div>
+      <p class="industries-note reveal">¿Tu negocio no está en la lista? Si cobras algo de forma recurrente y necesitas dar seguimiento a quién debe, cuánto y desde cuándo, este sistema se adapta a tu operación.</p>
+    </div>
+  </section>
+
+  <!-- CTA BAND -->
+  <section>
+    <div class="cta-band reveal">
+      <div>
+        <h2>¿Listo para dejar de perseguir tu propio Excel?</h2>
+        <p>Agenda una demo de 20 minutos y te mostramos el sistema con datos parecidos a los tuyos.</p>
+      </div>
+      <a href="#contacto" class="btn btn-light">Solicitar demo</a>
+    </div>
+  </section>
+
+  <!-- CONTACTO -->
+  <section id="contacto">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="section-eyebrow">Contáctanos</span>
+        <h2>Hablemos sobre tu proceso de cobranza.</h2>
+        <p>Cuéntanos sobre tu negocio y te contactamos para agendar una demo o resolver tus dudas.</p>
+      </div>
+      <div class="contact-grid reveal">
+        <form class="contact-form" id="contactForm">
+          <div class="f-row2">
+            <div class="f-field">
+              <label for="cf-nombre">Nombre completo</label>
+              <input type="text" id="cf-nombre" name="nombre" required>
+            </div>
+            <div class="f-field">
+              <label for="cf-empresa">Empresa / Institución</label>
+              <input type="text" id="cf-empresa" name="empresa" required>
+            </div>
+          </div>
+          <div class="f-row2">
+            <div class="f-field">
+              <label for="cf-correo">Correo electrónico</label>
+              <input type="email" id="cf-correo" name="correo" required>
+            </div>
+            <div class="f-field">
+              <label for="cf-telefono">Teléfono (opcional)</label>
+              <input type="tel" id="cf-telefono" name="telefono">
+            </div>
+          </div>
+          <div class="f-field">
+            <label for="cf-mensaje">Cuéntanos sobre tu negocio</label>
+            <textarea id="cf-mensaje" name="mensaje" placeholder="¿Cuántas cuentas críticas manejas al mes, aproximadamente?" required></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%;">Enviar mensaje</button>
+          <p class="required-note">Al enviar, se abrirá tu programa de correo con el mensaje listo para confirmar y enviar.</p>
+          <div class="form-msg ok" id="formMsg">Tu mensaje está listo. Revisa tu programa de correo para confirmarlo y enviarlo — te responderemos en menos de 1 día hábil.</div>
+        </form>
+
+        <div class="contact-info-card">
+          <div class="contact-row">
+            <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z" opacity="0"/><path d="M22 6 12 13 2 6"/><path d="M2 6h20v12H2z"/></svg></div>
+            <div>
+              <div class="label">Correo</div>
+              <a class="val" href="mailto:hola@cuentascriticas.app">hola@cuentascriticas.app</a>
+            </div>
+          </div>
+          <div class="contact-row">
+            <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15.5a2 2 0 0 1-2.2 2A19 19 0 0 1 3.5 5.2 2 2 0 0 1 5.5 3h2.4a1 1 0 0 1 1 .8l.9 4a1 1 0 0 1-.4 1L8 10a15 15 0 0 0 6 6l1.2-1.4a1 1 0 0 1 1-.4l4 .9a1 1 0 0 1 .8 1v2.4z"/></svg></div>
+            <div>
+              <div class="label">WhatsApp / Teléfono</div>
+              <a class="val" href="https://wa.me/18095550100" target="_blank" rel="noopener">+1 (809) 555-0100</a>
+            </div>
+          </div>
+          <div class="contact-row">
+            <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
+            <div>
+              <div class="label">Horario de atención</div>
+              <div class="val">Lunes a viernes, 8:00 a.m. – 5:00 p.m.</div>
+            </div>
+          </div>
+          <div class="contact-row">
+            <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.2-9.5-9.6C.6 7.6 2.4 4 6 4c2 0 3.4 1 4.5 2.5C11.6 5 13 4 15 4c3.6 0 5.4 3.6 3.5 7.4C19 15.8 12 21 12 21z" opacity="0"/><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+            <div>
+              <div class="label">Ubicación</div>
+              <div class="val">Santo Domingo, República Dominicana</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a href="#top" class="brand"><div class="brand-mark">CC</div><span class="brand-name">Cuentas Críticas</span></a>
+        <p>Seguimiento de cuentas críticas por cobrar para colegios, clínicas, membresías y cualquier negocio con cobros recurrentes.</p>
+      </div>
+      <div class="foot-links">
+        <div class="foot-col">
+          <h4>Producto</h4>
+          <a href="#caracteristicas">Características</a>
+          <a href="#como-funciona">Cómo funciona</a>
+          <a href="#industrias">Para tu negocio</a>
+        </div>
+        <div class="foot-col">
+          <h4>Contacto</h4>
+          <a href="mailto:hola@cuentascriticas.app">hola@cuentascriticas.app</a>
+          <a href="https://wa.me/18095550100" target="_blank" rel="noopener">+1 (809) 555-0100</a>
+          <a href="#contacto">Solicitar demo</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© <span id="year"></span> Cuentas Críticas. Todos los derechos reservados.</span>
+      <span>Hecho para equipos que necesitan cobrar con orden.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+try { document.getElementById('year').textContent = new Date().getFullYear(); } catch(e){}
+
+// Reveal on scroll
+try {
+  const revealEls = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window){
+    const io = new IntersectionObserver((entries)=>{
+      entries.forEach(en=>{ if (en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.15 });
+    revealEls.forEach(el=> io.observe(el));
+  } else {
+    revealEls.forEach(el=> el.classList.add('in'));
+  }
+} catch(e){
+  document.querySelectorAll('.reveal').forEach(el=> el.classList.add('in'));
+}
+
+// Signature ledger strip animation (hero)
+try {
+(function(){
+  const chips = Array.from(document.querySelectorAll('#mesesStrip .chip'));
+  const amountEl = document.getElementById('ledgerAmount');
+  const badgeEl = document.getElementById('ledgerBadge');
+  const noteEl = document.getElementById('ledgerNote');
+  const stages = ['verde','verde','verde','amarillo','naranja','naranja','rojo','rojo','rojo','rojo','rojo'];
+  let reduceMotion = false;
+  try { reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){ reduceMotion = false; }
+
+  function badgeFor(litCount){
+    if (litCount<=2) return {c:'verde', l:'Al día', amt:0};
+    if (litCount===3) return {c:'amarillo', l:'3 meses', amt:15000};
+    if (litCount<=5) return {c:'naranja', l:litCount+' meses', amt:30000};
+    return {c:'rojo', l:'6 meses o más', amt:48000};
+  }
+  function paint(litCount){
+    chips.forEach((chip,i)=>{
+      chip.className = 'chip' + (i<litCount ? ' lit-'+stages[i] : '');
+    });
+    const b = badgeFor(litCount);
+    badgeEl.querySelector('.d').style.background = `var(--${b.c})`;
+    badgeEl.lastChild.textContent = ' ' + b.l;
+    amountEl.textContent = 'RD$ ' + b.amt.toLocaleString('es-DO');
+  }
+
+  if (reduceMotion){ paint(11); return; }
+
+  let step = 0;
+  const growInterval = setInterval(()=>{
+    step++;
+    paint(step);
+    if (step>=11){
+      clearInterval(growInterval);
+      setTimeout(runAbono, 1400);
+    }
+  }, 260);
+
+  function runAbono(){
+    noteEl.textContent = 'Se registra un abono de RD$ 20,000 con fecha de hoy…';
+    setTimeout(()=>{
+      amountEl.textContent = 'RD$ 28,000';
+      amountEl.classList.add('paid-flash');
+      noteEl.textContent = 'El balance pendiente se recalculó solo. Así funciona en cada cuenta, cada mes.';
+      setTimeout(()=> amountEl.classList.remove('paid-flash'), 1200);
+    }, 1100);
+  }
+})();
+} catch(e){ /* la animación decorativa no debe impedir el resto de la página */ }
+
+// Contact form -> mailto fallback (sin backend propio)
+try {
+  document.getElementById('contactForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    const nombre = document.getElementById('cf-nombre').value.trim();
+    const empresa = document.getElementById('cf-empresa').value.trim();
+    const correo = document.getElementById('cf-correo').value.trim();
+    const telefono = document.getElementById('cf-telefono').value.trim();
+    const mensaje = document.getElementById('cf-mensaje').value.trim();
+
+    const subject = encodeURIComponent(`Solicitud de demo — ${empresa || nombre}`);
+    const body = encodeURIComponent(
+`Nombre: ${nombre}
+Empresa/Institución: ${empresa}
+Correo: ${correo}
+Teléfono: ${telefono || '—'}
+
+Mensaje:
+${mensaje}`
+    );
+    window.location.href = `mailto:hola@cuentascriticas.app?subject=${subject}&body=${body}`;
+    document.getElementById('formMsg').classList.add('show');
+  });
+} catch(e){ /* si falla el listener, el formulario sigue siendo enviable como formulario nativo */ }
+</script>
+</body>
+</html>

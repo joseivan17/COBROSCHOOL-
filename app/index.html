@@ -1898,7 +1898,7 @@ function renderBaseDeDatos(root){
     if ((DB.familias.length > 0 || DB.estudiantes.length > 0) && STORAGE_MODE !== 'supabase'){
       const seguir = confirm(
         'Ya tiene datos guardados (familias, estudiantes, etc.) en su almacenamiento actual.\n\n' +
-        'Al conectar Supabase, la app empieza a leer y escribir en esa base de datos — que probablemente esté vacía si es un proyecto nuevo. Sus datos actuales NO se mueven solos.\n\n' +
+        'Al conectar Supabase, la app empieza a leer y escribir en esa base de datos — que probablemente esté vacía si es un proyecto nuevo. Sus datos actuales de negocio (familias, cuentas, abonos) NO se mueven solos, pero SU CUENTA DE USUARIO SÍ se trasladará automáticamente para que pueda seguir entrando.\n\n' +
         'Recomendado: cancele, vaya a "Respaldo de Datos" y exporte un respaldo (.json) ANTES de continuar. Luego conecte Supabase y restaure ese respaldo desde "Respaldo de Datos" para migrar todo de una vez.\n\n' +
         '¿Desea continuar de todas formas sin exportar primero?'
       );
@@ -1908,10 +1908,20 @@ function renderBaseDeDatos(root){
     if (!r.ok){
       if (!confirm('La prueba de conexión falló: ' + r.error + '\n\n¿Guardar de todas formas? (puede corregirlo después)')) return;
     }
+    const usuariosLocalesPrevios = DB.usuarios.slice();
     await guardarConfigSupabase(url, key);
     await verificarAlmacenamiento();
     await recargarDatosDeNegocio();
-    registrarAuditoria('Base de datos Supabase configurada', url);
+    // Si es la primera vez que se conecta este proyecto (todavía no tiene usuarios),
+    // se lleva la(s) cuenta(s) local(es) — típicamente el Administrador que acaba de conectar —
+    // para que quede sembrada la base compartida y otros dispositivos puedan iniciar sesión.
+    let usuariosMigrados = 0;
+    if (DB.usuarios.length === 0 && usuariosLocalesPrevios.length > 0){
+      DB.usuarios = usuariosLocalesPrevios;
+      await saveUsuarios();
+      usuariosMigrados = usuariosLocalesPrevios.length;
+    }
+    registrarAuditoria('Base de datos Supabase configurada', url + (usuariosMigrados ? ` · ${usuariosMigrados} cuenta(s) de usuario migradas` : ''));
     renderAll();
   };
   const btnDesc = document.getElementById('sbDesconectar');
@@ -2086,7 +2096,7 @@ function renderLogin(){
   if (s.step === 'setup-admin'){
     box.innerHTML = shell(`
       <h2>Configuración inicial</h2>
-      <p class="sub">Todavía no hay ninguna cuenta creada. Cree la cuenta del <b>Administrador</b> — será quien pueda crear al resto del equipo después.</p>
+      <p class="sub">Todavía no hay ninguna cuenta creada en este dispositivo. Cree la cuenta del <b>Administrador</b> — será quien pueda crear al resto del equipo después.</p>
       ${s.error?`<div class="login-error">${s.error}</div>`:''}
       <div class="login-field"><label>Nombre completo</label><input type="text" id="suNombre" placeholder="Nombre y apellido"></div>
       <div class="login-field"><label>Correo electrónico</label><input type="email" id="suCorreo" placeholder="nombre@sunegocio.com"></div>
@@ -2096,7 +2106,9 @@ function renderLogin(){
       <div class="login-field"><label>Respuesta de seguridad</label><input type="text" id="suRespuesta" placeholder="Respuesta"></div>
       <div class="login-actions"><button class="btn btn-primary" id="suSubmit">Crear cuenta e ingresar</button></div>
       <div class="login-note">Esta será la única cuenta con acceso total al inicio. Desde "Usuarios y Roles" podrá crear las demás cuentas del equipo (Contable, Auxiliar) una vez adentro.</div>
+      <div class="login-link" id="loIrConectarBD" style="margin-top:14px;">¿Su equipo ya tiene una base de datos configurada (Supabase)? Conectar en vez de crear una cuenta nueva</div>
     `);
+    document.getElementById('loIrConectarBD').onclick = ()=>{ loginState = { step:'conectar-bd', error:'', ok:'', pendingUser:null, volverA:'setup-admin' }; renderLogin(); };
     document.getElementById('suSubmit').onclick = async ()=>{
       const nombre = document.getElementById('suNombre').value.trim();
       const correo = document.getElementById('suCorreo').value.trim().toLowerCase();
@@ -2126,6 +2138,34 @@ function renderLogin(){
     return;
   }
 
+  if (s.step === 'conectar-bd'){
+    box.innerHTML = shell(`
+      <span class="login-back" id="loBack">← Volver</span>
+      <h2>Conectar a una base de datos existente</h2>
+      <p class="sub">Si otro miembro de su equipo ya conectó este sistema a un proyecto de Supabase, ingrese aquí los mismos datos para ver las mismas cuentas y la misma información.</p>
+      ${s.error?`<div class="login-error">${s.error}</div>`:''}
+      <div class="login-field"><label>Project URL</label><input type="text" id="cbUrl" placeholder="https://xxxxxxxx.supabase.co"></div>
+      <div class="login-field"><label>Anon / Public key</label><input type="text" id="cbKey" placeholder="eyJhbGciOi..."></div>
+      <div class="login-actions"><button class="btn btn-primary" id="cbConectar">Conectar</button></div>
+      <div class="login-note">Pídale estos dos datos al Administrador que configuró Supabase la primera vez — están en "Base de Datos (Supabase)" dentro de la app.</div>
+    `);
+    document.getElementById('loBack').onclick = ()=>{ loginState = { step: s.volverA || 'login', error:'', ok:'', pendingUser:null }; renderLogin(); };
+    document.getElementById('cbConectar').onclick = async ()=>{
+      const url = document.getElementById('cbUrl').value;
+      const key = document.getElementById('cbKey').value;
+      if (!url.trim() || !key.trim()){ loginState.error='Complete el Project URL y la anon key.'; renderLogin(); return; }
+      const btn = document.getElementById('cbConectar'); btn.textContent = 'Conectando…'; btn.disabled = true;
+      const r = await supabaseProbar(url, key);
+      if (!r.ok){ loginState.error = r.error; renderLogin(); return; }
+      await guardarConfigSupabase(url, key);
+      await verificarAlmacenamiento();
+      await recargarDatosDeNegocio();
+      loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'Conectado. Ahora puede iniciar sesión con las cuentas de su equipo.', pendingUser:null };
+      renderLogin();
+    };
+    return;
+  }
+
   if (s.step === 'login'){
     box.innerHTML = shell(`
       <h2>Iniciar sesión</h2>
@@ -2138,7 +2178,9 @@ function renderLogin(){
       <div class="login-link" id="loForgot">¿Olvidó su contraseña?</div>
       <div class="login-note">La clave se recupera respondiendo su pregunta de seguridad. Este sistema no envía correos reales (no cuenta con servidor de correo).</div>
       <div class="login-link" id="loFactoryReset" style="color:var(--rojo);margin-top:10px;">¿Perdió el acceso a todas las cuentas? Reiniciar usuarios</div>
+      <div class="login-link" id="loIrConectarBD2" style="margin-top:10px;">¿Necesita conectarse a la base de datos de su equipo (Supabase)?</div>
     `);
+    document.getElementById('loIrConectarBD2').onclick = ()=>{ loginState = { step:'conectar-bd', error:'', ok:'', pendingUser:null, volverA:'login' }; renderLogin(); };
     const submit = async ()=>{
       const email = (document.getElementById('loEmail').value||'').trim().toLowerCase();
       const pass = document.getElementById('loPass').value||'';

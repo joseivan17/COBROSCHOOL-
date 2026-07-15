@@ -18,7 +18,11 @@ Sistema web para dar seguimiento a cuentas críticas por cobrar (familias/client
 
 ## Primer uso
 
-Al abrir `app/index.html` por primera vez, **no hay ninguna cuenta creada**. La app te pedirá crear la cuenta del Administrador (nombre, correo, contraseña, pregunta de seguridad). No hay contraseñas de fábrica conocidas.
+Al abrir `app/index.html` por primera vez en un dispositivo, la app pregunta si:
+- **Ya existe una base de datos Supabase configurada por tu equipo** → conéctate ahí para ver e iniciar sesión con las cuentas reales que ya existen, o
+- **Es la primera vez que se usa el sistema** → crea la cuenta del Administrador.
+
+No hay contraseñas de fábrica conocidas.
 
 ## ⚠️ Cómo abrir `app/index.html`
 
@@ -32,7 +36,7 @@ Al abrir `app/index.html` por primera vez, **no hay ninguna cuenta creada**. La 
 
 ## Subir estos archivos a tu repositorio
 
-**Desde la web de GitHub:** "Add file" → "Upload files" → arrastra `app/`, `landing/`, `plantillas/` y los `.md`. **Si ya tenías una versión subida, tienes que volver a subir `app/index.html` para reemplazarla** — GitHub te preguntará si quieres sobrescribir el archivo existente, confirma que sí.
+**Desde la web de GitHub:** "Add file" → "Upload files" → arrastra `app/`, `landing/`, `plantillas/` y los `.md`. **Si ya tenías una versión subida, tienes que volver a subir `app/index.html` para reemplazarla.**
 
 **Con git:**
 ```bash
@@ -59,14 +63,15 @@ git push origin main
      for all using (true) with check (true);
    ```
 3. Settings → API → copia el **Project URL** y la **anon public key**.
-4. Dentro de la app (ya logueado como Administrador) → **"Base de Datos (Supabase)"** → pega ambos → "Probar conexión" → "Guardar y activar".
+4. Dentro de la app (ya logueado como Administrador) → **"Base de Datos (Supabase)"** → pega ambos → "Probar conexión" → "Guardar y activar". Su cuenta de Administrador se traslada automáticamente a la base compartida.
+5. **En cada dispositivo adicional del equipo**: en la pantalla de inicio (antes de crear ninguna cuenta), hacer clic en **"¿Su equipo ya tiene una base de datos configurada? Conectar"**, pegar el mismo Project URL y anon key, y ya podrán iniciar sesión con las cuentas reales del equipo — sin crear cuentas duplicadas.
 
 Detalle completo, capturas de dónde hacer clic y la Fase 2 (esquema relacional + RLS por rol) en `ARQUITECTURA_Y_ESCALABILIDAD.md`.
 
 ## Arquitectura — resumen
 
 - **Almacenamiento en 5 niveles**, verificado en tiempo real: Supabase (si lo conectas) → Nube de Claude.ai → IndexedDB → localStorage → memoria.
-- **Base de datos real (Supabase)**: sincronización probada de punta a punta entre dos dispositivos distintos.
+- **Base de datos real (Supabase)**: sincronización probada de punta a punta entre dos dispositivos distintos, incluyendo el flujo de conectarse desde cero sin duplicar cuentas.
 - **Guardado con fusión segura**: evita que dos personas guardando casi al mismo tiempo se pisen los cambios.
 - **Coincidencia de códigos normalizada**: `FAM-0001` y `fam-0001` se tratan igual.
 - **Login obligatorio**: correo + contraseña, bloqueo tras 5 intentos fallidos, cierre por inactividad, recuperación por pregunta de seguridad.

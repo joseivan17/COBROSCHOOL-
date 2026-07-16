@@ -279,9 +279,17 @@ async function borrarConfigSupabase(){
 
 /* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
    para no depender de un CDN fuera de lo permitido en este entorno. ---------- */
+// Tiempo máximo de espera para cualquier llamada a Supabase. Sin esto, una red lenta o que
+// bloquee la conexión en silencio podía dejar el arranque de la app esperando indefinidamente.
+const SUPABASE_TIMEOUT_MS = 7000;
+function fetchConTimeout(url, options){
+  const controller = new AbortController();
+  const timer = setTimeout(()=> controller.abort(), SUPABASE_TIMEOUT_MS);
+  return fetch(url, { ...(options||{}), signal: controller.signal }).finally(()=> clearTimeout(timer));
+}
 async function supabaseFetch(path, options){
   options = options || {};
-  return fetch(SUPABASE_URL + path, {
+  return fetchConTimeout(SUPABASE_URL + path, {
     ...options,
     headers: {
       apikey: SUPABASE_ANON_KEY,
@@ -295,13 +303,14 @@ async function supabaseProbar(url, key){
   const base = normalizarSupabaseUrl(url);
   if (!base || !key) return { ok:false, error:'Complete el Project URL y la anon key.' };
   try{
-    const res = await fetch(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
+    const res = await fetchConTimeout(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
     if (res.status === 200) return { ok:true };
     if (res.status === 404 || res.status === 400) return { ok:false, error:'No se encontró la tabla "kv_store". Verifique que ejecutó el script SQL en su proyecto de Supabase (ver ARQUITECTURA_Y_ESCALABILIDAD.md).' };
     if (res.status === 401 || res.status === 403) return { ok:false, error:'Credenciales rechazadas (código '+res.status+'). Verifique el Project URL y la anon key.' };
     return { ok:false, error:'Respuesta inesperada del servidor (código ' + res.status + ').' };
   }catch(e){
-    return { ok:false, error:'No se pudo conectar: ' + (e && e.message || e) };
+    const motivo = (e && e.name === 'AbortError') ? `Se agotó el tiempo de espera (${SUPABASE_TIMEOUT_MS/1000}s) intentando conectar.` : ('No se pudo conectar: ' + (e && e.message || e));
+    return { ok:false, error:motivo };
   }
 }
 async function supabaseGet(key){
@@ -826,12 +835,21 @@ function hasDemoData(){
   return DB.familias.some(f=>f._demo) || DB.estudiantes.some(e=>e._demo) || DB.cuentas.some(c=>c._demo) || DB.seguimientos.some(s=>s._demo) || DB.abonos.some(a=>a._demo);
 }
 async function eliminarDatosDemo(){
+  const familiasBorradas = DB.familias.filter(f=>f._demo).map(f=>f.codigo);
+  const estudiantesBorrados = DB.estudiantes.filter(e=>e._demo).map(e=>e.codigo);
+  const cuentasBorradas = DB.cuentas.filter(c=>c._demo).map(c=>c.id);
+  const seguimientosBorrados = DB.seguimientos.filter(s=>s._demo).map(s=>s.id);
+  const abonosBorrados = DB.abonos.filter(a=>a._demo).map(a=>a.id);
   DB.familias = DB.familias.filter(f=>!f._demo);
   DB.estudiantes = DB.estudiantes.filter(e=>!e._demo);
   DB.cuentas = DB.cuentas.filter(c=>!c._demo);
   DB.seguimientos = DB.seguimientos.filter(s=>!s._demo);
   DB.abonos = DB.abonos.filter(a=>!a._demo);
-  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos();
+  // Importante: se pasan las claves eliminadas explícitamente. Sin esto, en modo compartido
+  // (Supabase/nube), la fusión segura no tenía forma de saber qué borrar y el "vaciado" no
+  // surtía efecto — solo evitaba agregar de más, pero no quitaba lo que ya estaba guardado.
+  await saveFamilias(familiasBorradas); await saveEstudiantes(estudiantesBorrados);
+  await saveCuentas(cuentasBorradas); await saveSeguimientos(seguimientosBorrados); await saveAbonos(abonosBorrados);
   registrarAuditoria('Datos de muestra eliminados', '');
 }
 // Vacía TODOS los datos de negocio (familias, estudiantes, cuentas, seguimientos, abonos,
@@ -847,8 +865,16 @@ async function vaciarTodosLosDatos(){
     `Para confirmar, escriba exactamente: VACIAR`
   );
   if (frase !== 'VACIAR'){ if (frase !== null) alert('No coincide con "VACIAR". No se hizo ningún cambio.'); return false; }
+  // Se capturan las claves ANTES de vaciar los arreglos, para poder decírselo explícitamente
+  // a la fusión segura (ver nota en eliminarDatosDemo — mismo motivo del bug).
+  const clavesFamilias = DB.familias.map(f=>f.codigo);
+  const clavesEstudiantes = DB.estudiantes.map(e=>e.codigo);
+  const clavesCuentas = DB.cuentas.map(c=>c.id);
+  const clavesSeguimientos = DB.seguimientos.map(s=>s.id);
+  const clavesAbonos = DB.abonos.map(a=>a.id);
   DB.familias = []; DB.estudiantes = []; DB.cuentas = []; DB.seguimientos = []; DB.abonos = []; DB.estudianteActividades = [];
-  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos(); await saveActividades();
+  await saveFamilias(clavesFamilias); await saveEstudiantes(clavesEstudiantes); await saveCuentas(clavesCuentas);
+  await saveSeguimientos(clavesSeguimientos); await saveAbonos(clavesAbonos); await saveActividades();
   registrarAuditoria('Vaciado total de datos de negocio', `${conteo} registro(s) eliminados (familias, estudiantes, cuentas, seguimientos, abonos, actividades). Usuarios y catálogos conservados.`);
   return true;
 }
@@ -884,8 +910,18 @@ async function importBackupFile(file, onDone, onError){
     DB.abonos = d.abonos || [];
     DB.catalogos = d.catalogos || DB.catalogos;
     DB.auditoria = d.auditoria || DB.auditoria;
-    await saveFamilias(); await saveEstudiantes(); await saveActividades();
-    await saveCuentas(); await saveSeguimientos(); await saveUsuarios(); await saveAbonos(); await saveCatalogos();
+    // Restaurar un respaldo debe REEMPLAZAR todo por completo, no fusionarse con lo que ya
+    // estuviera guardado (por eso se usa dbSet directo y no las funciones save*/mergeYGuardar,
+    // que están pensadas para ediciones normales sin perder cambios ajenos, no para una restauración).
+    await dbSet('ccc:familias', DB.familias);
+    await dbSet('ccc:estudiantes', DB.estudiantes);
+    await dbSet('ccc:actividades', DB.actividades);
+    await dbSet('ccc:estudiante_actividades', DB.estudianteActividades);
+    await dbSet('ccc:cuentas', DB.cuentas);
+    await dbSet('ccc:seguimientos', DB.seguimientos);
+    await dbSet('ccc:usuarios', DB.usuarios);
+    await dbSet('ccc:abonos', DB.abonos);
+    await dbSet('ccc:catalogos', DB.catalogos);
     await dbSet('ccc:seeded', true);
     registrarAuditoria('Respaldo restaurado', file.name||'');
     if (onDone) onDone();

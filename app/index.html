@@ -1726,27 +1726,84 @@ function renderFichas(root){
   const canEdit = perm('editarFicha');
   root.innerHTML = `
     <div class="toolbar">
-      <div class="searchbar"><input id="fichaSearch" placeholder="Buscar por nombre, código de estudiante, código o nombre de familia…"></div>
+      <div class="searchbar"><input id="fichaSearch" placeholder="Buscar por código de familia, responsable, o nombre/código de estudiante…"></div>
       ${canEdit?`<div class="field"><label>&nbsp;</label><button class="btn" id="fNuevaFamilia">+ Nueva familia</button></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="fNuevoEstudiante">+ Nuevo estudiante</button></div>`:''}
     </div>
     <div class="grid grid-2" style="align-items:start;">
-      <div class="card"><h2>Estudiantes <span class="n" id="fichaCount"></span></h2><div class="tablewrap" style="max-height:560px;"><table><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Familia</th></tr></thead><tbody id="fichaList"></tbody></table></div></div>
-      <div id="fichaDetail" class="card"><div class="empty">Seleccione un estudiante para ver su ficha completa.</div></div>
+      <div class="card"><h2>Familias <span class="n" id="fichaCount"></span></h2>
+        <p class="small" style="margin-top:-6px;margin-bottom:10px;">Haga clic en una familia para ver a sus estudiantes.</p>
+        <div class="tablewrap" style="max-height:560px;"><table><thead><tr><th>Código</th><th>Familia / Estudiante</th><th>Nivel / Cant.</th><th>Teléfono</th></tr></thead><tbody id="fichaList"></tbody></table></div>
+      </div>
+      <div id="fichaDetail" class="card"><div class="empty">Seleccione una familia y luego un estudiante para ver su ficha completa.</div></div>
     </div>
   `;
   const search = document.getElementById('fichaSearch');
+  const expandedFamilias = new Set();
   const drawList = ()=>{
     const q = (search.value||'').toLowerCase();
-    let list = DB.estudiantes.filter(e=>{
-      const fam = familiaByCodigo(e.codigoFamilia);
-      return e.nombre.toLowerCase().includes(q) || e.codigo.toLowerCase().includes(q)
-        || (e.codigoFamilia||'').toLowerCase().includes(q)
-        || (fam&&fam.responsable.toLowerCase().includes(q));
+    const grupos = DB.familias.map(fam=>({
+      fam, hijos: DB.estudiantes.filter(e=> normCode(e.codigoFamilia)===normCode(fam.codigo))
+    }));
+    const sinFamilia = DB.estudiantes.filter(e=> !e.codigoFamilia || !familiaByCodigo(e.codigoFamilia));
+
+    const coincideHijo = (h)=> h.nombre.toLowerCase().includes(q) || h.codigo.toLowerCase().includes(q);
+    const gruposFiltrados = grupos.filter(({fam, hijos})=>{
+      if (!q) return true;
+      return fam.codigo.toLowerCase().includes(q) || fam.responsable.toLowerCase().includes(q) || hijos.some(coincideHijo);
     });
-    document.getElementById('fichaCount').textContent = list.length;
-    document.getElementById('fichaList').innerHTML = list.map(e=>`<tr class="linklike-row" data-c="${e.codigo}"><td class="mono">${e.codigo}</td><td>${e.nombre}</td><td>${e.nivel}</td><td>${(familiaByCodigo(e.codigoFamilia)||{}).responsable||''} <span class="small mono">${e.codigoFamilia?`(${e.codigoFamilia})`:''}</span></td></tr>`).join('') || `<tr><td colspan="4" class="empty">Sin resultados</td></tr>`;
-    document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.style.cursor='pointer');
+    const sinFamiliaFiltrada = sinFamilia.filter(h=> !q || coincideHijo(h));
+
+    document.getElementById('fichaCount').textContent = `${gruposFiltrados.length} familias · ${DB.estudiantes.length} estudiantes`;
+
+    let html = '';
+    gruposFiltrados.forEach(({fam, hijos})=>{
+      const autoExpandir = !!q && hijos.some(coincideHijo) && !fam.codigo.toLowerCase().includes(q) && !fam.responsable.toLowerCase().includes(q);
+      const expandido = expandedFamilias.has(fam.codigo) || autoExpandir;
+      html += `<tr class="linklike-row" data-famtoggle="${fam.codigo}" style="cursor:pointer;background:var(--paper);">
+        <td class="mono" style="font-weight:700;">${expandido?'▾':'▸'} ${fam.codigo}</td>
+        <td style="font-weight:700;">${fam.responsable}</td>
+        <td>${hijos.length} estudiante${hijos.length!==1?'s':''}</td>
+        <td class="mono small">${fam.tel1||''}</td>
+      </tr>`;
+      if (expandido){
+        if (!hijos.length){
+          html += `<tr><td></td><td colspan="3" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td></tr>`;
+        }
+        hijos.forEach(h=>{
+          html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
+            <td class="mono small" style="padding-left:26px;">${h.codigo}</td>
+            <td>${h.nombre}</td>
+            <td class="small">${h.nivel||''} ${h.grado||''}</td>
+            <td></td>
+          </tr>`;
+        });
+      }
+    });
+    if (sinFamiliaFiltrada.length){
+      const expandidoSin = expandedFamilias.has('__sin_familia__');
+      html += `<tr class="linklike-row" data-famtoggle="__sin_familia__" style="cursor:pointer;background:var(--paper);">
+        <td class="mono" style="font-weight:700;">${expandidoSin?'▾':'▸'} —</td>
+        <td style="font-weight:700;color:var(--rojo);">Sin familia asignada</td>
+        <td>${sinFamiliaFiltrada.length} estudiante${sinFamiliaFiltrada.length!==1?'s':''}</td><td></td>
+      </tr>`;
+      if (expandidoSin){
+        sinFamiliaFiltrada.forEach(h=>{
+          html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
+            <td class="mono small" style="padding-left:26px;">${h.codigo}</td><td>${h.nombre}</td><td class="small">${h.nivel||''} ${h.grado||''}</td><td></td>
+          </tr>`;
+        });
+      }
+    }
+    document.getElementById('fichaList').innerHTML = html || `<tr><td colspan="4" class="empty">Sin resultados</td></tr>`;
+
+    document.querySelectorAll('[data-famtoggle]').forEach(tr=>{
+      tr.onclick = ()=>{
+        const key = tr.dataset.famtoggle;
+        if (expandedFamilias.has(key)) expandedFamilias.delete(key); else expandedFamilias.add(key);
+        drawList();
+      };
+    });
     document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.onclick = ()=> drawDetail(tr.dataset.c));
   };
   function drawDetail(codigo){

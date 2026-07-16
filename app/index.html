@@ -814,6 +814,10 @@ function balanceOriginal(cuenta){
 function balancePendiente(cuenta){
   return Math.max(0, balanceOriginal(cuenta) - totalAbonadoCuenta(cuenta.id));
 }
+function actividadesPendientesDeEstudiante(codigoEstudiante){
+  const pend = DB.estudianteActividades.filter(ea=>ea.codigoEstudiante===codigoEstudiante && !ea.pagado);
+  return { count: pend.length, total: pend.reduce((s,a)=>s+Number(a.costo||0),0), items: pend };
+}
 
 /* =========================================================================
    RESPALDO / RESTAURACIÓN / LIMPIEZA DE DATOS DE MUESTRA
@@ -829,6 +833,24 @@ async function eliminarDatosDemo(){
   DB.abonos = DB.abonos.filter(a=>!a._demo);
   await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos();
   registrarAuditoria('Datos de muestra eliminados', '');
+}
+// Vacía TODOS los datos de negocio (familias, estudiantes, cuentas, seguimientos, abonos,
+// inscripciones a actividades) — conserva usuarios, catálogos y el propio registro de auditoría.
+async function vaciarTodosLosDatos(){
+  const conteo = DB.familias.length + DB.estudiantes.length + DB.cuentas.length + DB.seguimientos.length + DB.abonos.length + DB.estudianteActividades.length;
+  const frase = prompt(
+    `Esto ELIMINARÁ PERMANENTEMENTE todos los datos de negocio de este sistema:\n` +
+    `• ${DB.familias.length} familia(s)\n• ${DB.estudiantes.length} estudiante(s)\n• ${DB.cuentas.length} registro(s) de cuentas críticas\n` +
+    `• ${DB.seguimientos.length} gestión(es)\n• ${DB.abonos.length} abono(s)\n• ${DB.estudianteActividades.length} inscripción(es) a actividades\n\n` +
+    `Los usuarios, catálogos y el historial de auditoría NO se borran.\n\n` +
+    `Esta acción no se puede deshacer. Se recomienda exportar un respaldo antes de continuar.\n\n` +
+    `Para confirmar, escriba exactamente: VACIAR`
+  );
+  if (frase !== 'VACIAR'){ if (frase !== null) alert('No coincide con "VACIAR". No se hizo ningún cambio.'); return false; }
+  DB.familias = []; DB.estudiantes = []; DB.cuentas = []; DB.seguimientos = []; DB.abonos = []; DB.estudianteActividades = [];
+  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos(); await saveActividades();
+  registrarAuditoria('Vaciado total de datos de negocio', `${conteo} registro(s) eliminados (familias, estudiantes, cuentas, seguimientos, abonos, actividades). Usuarios y catálogos conservados.`);
+  return true;
 }
 function exportBackup(){
   const payload = {
@@ -996,7 +1018,7 @@ function renderReporte(root){
   const periodos = periodosDisponibles();
   const periodo = ultimoPeriodo();
   root.innerHTML = `
-    <div class="note">Ciclo de seguimiento: <b>Septiembre a Julio</b>. El "Balance pendiente" ya descuenta los abonos registrados para cada estudiante.</div>
+    <div class="note">Ciclo de seguimiento: <b>Septiembre a Julio</b>. El "Balance pendiente" ya descuenta los abonos registrados para cada estudiante. Por defecto solo se muestran cuentas con saldo pendiente.</div>
     <div class="toolbar">
       <div class="field"><label>Periodo</label><select id="rPeriodo">${periodos.map(p=>`<option value="${p}" ${p===periodo?'selected':''}>${p} · ${anioEscolar(p)}</option>`).join('') || '<option value="">Sin datos</option>'}</select></div>
       <div class="field"><label>Nivel</label><select id="rNivel"><option value="">Todos</option>${DB.catalogos.niveles.map(n=>`<option>${n}</option>`).join('')}</select></div>
@@ -1004,6 +1026,7 @@ function renderReporte(root){
       <div class="field"><label>Estado</label><select id="rEstado"><option value="">Todos</option>${DB.catalogos.estadosCuenta.map(n=>`<option>${n}</option>`).join('')}</select></div>
       <div class="field"><label>Responsable</label><select id="rResp"><option value="">Todos</option>${DB.catalogos.responsables.map(n=>`<option>${n}</option>`).join('')}</select></div>
       <div class="field"><label>Rango de mora</label><select id="rRango"><option value="">Todos</option><option value="3">3 meses</option><option value="4_5">4–5 meses</option><option value="6">6+ meses</option></select></div>
+      <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:normal;padding:7px 0;"><input type="checkbox" id="rMostrarPagadas"> Mostrar cuentas ya saldadas/regularizadas</label></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="rExport">⭳ Exportar CSV</button></div>
       ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
     </div>
@@ -1011,10 +1034,10 @@ function renderReporte(root){
       <table>
         <thead><tr>
           <th>Código</th><th>Estudiante</th><th>Nivel</th><th>Grado</th><th>Internado</th><th>Familia</th><th>Teléfono</th>
-          <th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Abonado</th><th>Bal. pendiente</th><th>Últ. pago</th><th>Semáforo</th><th>Estado</th><th>Responsable</th><th>Últ. gestión</th><th>Próx. seg.</th><th>Observaciones</th><th></th>
+          <th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Abonado</th><th>Bal. pendiente</th><th>Activ. pend.</th><th>Últ. pago</th><th>Semáforo</th><th>Estado</th><th>Responsable</th><th>Últ. gestión</th><th>Próx. seg.</th><th>Observaciones</th><th></th>
         </tr></thead>
         <tbody id="rBody"></tbody>
-        <tfoot><tr class="tfoot-row"><td colspan="7">Totales (filtrado)</td><td id="rTotCasos"></td><td colspan="2"></td><td id="rTotBalance"></td><td colspan="9"></td></tr></tfoot>
+        <tfoot><tr class="tfoot-row"><td colspan="7">Totales (filtrado)</td><td id="rTotCasos"></td><td colspan="2"></td><td id="rTotBalance"></td><td id="rTotActividades"></td><td colspan="8"></td></tr></tfoot>
       </table>
     </div>
   `;
@@ -1025,7 +1048,9 @@ function renderReporte(root){
     const estado = document.getElementById('rEstado').value;
     const resp = document.getElementById('rResp').value;
     const rango = document.getElementById('rRango').value;
+    const mostrarPagadas = document.getElementById('rMostrarPagadas').checked;
     let rows = DB.cuentas.filter(c=>c.periodo===p).map(c=>({...c,_est:estudianteByCodigo(c.codigoEstudiante)}));
+    if (!mostrarPagadas) rows = rows.filter(r=> balancePendiente(r) > 0 && r.estado !== 'Regularizado');
     if (nivel) rows = rows.filter(r=>r._est && r._est.nivel===nivel);
     if (grado) rows = rows.filter(r=>r._est && r._est.grado===grado);
     if (estado) rows = rows.filter(r=>r.estado===estado);
@@ -1041,6 +1066,7 @@ function renderReporte(root){
       const canEditEstado = perm('editarCuenta');
       const abonado = totalAbonadoCuenta(r.id);
       const pendiente = balancePendiente(r);
+      const actPend = actividadesPendientesDeEstudiante(r.codigoEstudiante);
       return `<tr>
         <td class="mono">${r.codigoEstudiante}</td>
         <td>${r._est?r._est.nombre:'<span class="pill-error">No encontrado</span>'}</td>
@@ -1054,6 +1080,7 @@ function renderReporte(root){
         <td class="mono">${fmtMoney(r.balance)}</td>
         <td class="mono" style="color:var(--verde)">${fmtMoney(abonado)}</td>
         <td class="mono" style="font-weight:700;">${fmtMoney(pendiente)}</td>
+        <td>${actPend.count>0?`<span class="badge b-naranja">${actPend.count} · ${fmtMoney(actPend.total)}</span>`:`<span class="small">—</span>`}</td>
         <td class="mono">${r.fechaUltimoPago||'—'}</td>
         <td><span class="badge b-${s.c}"><span class="dot dot-${s.c}"></span>${s.l}</span></td>
         <td>${canEditEstado ? `<select data-id="${r.id}" class="estadoSel">${DB.catalogos.estadosCuenta.map(e=>`<option ${e===r.estado?'selected':''}>${e}</option>`).join('')}</select>` : r.estado}</td>
@@ -1062,14 +1089,17 @@ function renderReporte(root){
         <td class="mono">${r.proximoSeguimiento||'—'}</td>
         <td>${canEditEstado ? `<input type="text" class="obsInput" data-id="${r.id}" value="${(r.observaciones||'').replace(/"/g,'&quot;')}" placeholder="Escribir observación…" style="min-width:160px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-family:var(--font-ui);font-size:12.3px;">` : `<span class="small">${r.observaciones||''}</span>`}</td>
         <td style="white-space:nowrap;">
+          ${canEditEstado?`<button class="btn btn-sm" data-editar="${r.id}">✏ Editar</button>`:''}
           ${canEditEstado?`<button class="btn btn-sm btn-primary" data-abono="${r.id}">+ Abono</button>`:''}
           <button class="btn btn-sm" data-gest="${r.id}">+ Gestión</button>
           ${canEditEstado?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
         </td>
       </tr>`;
-    }).join('') || `<tr><td colspan="19" class="empty">No hay registros con estos filtros.</td></tr>`;
+    }).join('') || `<tr><td colspan="20" class="empty">${mostrarPagadas?'No hay registros con estos filtros.':'No hay cuentas con saldo pendiente en este periodo. Active "Mostrar cuentas ya saldadas/regularizadas" para ver el historial completo.'}</td></tr>`;
     document.getElementById('rTotCasos').textContent = rows.length + ' casos';
     document.getElementById('rTotBalance').textContent = fmtMoney(rows.reduce((s,r)=>s+balancePendiente(r),0));
+    const totalActPend = rows.reduce((s,r)=>s+actividadesPendientesDeEstudiante(r.codigoEstudiante).total,0);
+    document.getElementById('rTotActividades').textContent = fmtMoney(totalActPend) + ' activ.';
 
     tbody.querySelectorAll('.estadoSel').forEach(sel=>{
       sel.onchange = async ()=>{
@@ -1096,6 +1126,9 @@ function renderReporte(root){
         draw();
       };
     });
+    tbody.querySelectorAll('[data-editar]').forEach(btn=>{
+      btn.onclick = ()=> openCuentaModal(btn.dataset.editar, p, draw);
+    });
     tbody.querySelectorAll('[data-gest]').forEach(btn=>{
       btn.onclick = ()=> openGestionModal(btn.dataset.gest, draw);
     });
@@ -1106,14 +1139,17 @@ function renderReporte(root){
       Codigo:r.codigoEstudiante, Estudiante:r._est?r._est.nombre:'', Nivel:r._est?r._est.nivel:'', Grado:r._est?r._est.grado:'',
       Internado:r._est?r._est.internado:'', Familia: (r._est?(familiaByCodigo(r._est.codigoFamilia)||{}).responsable:''),
       Meses_Adeudados:r.mesesAdeudados, Balance_Anio_Anterior:r.balanceAnioAnterior, Balance_Meses_Actuales:r.balance,
-      Abonado:totalAbonadoCuenta(r.id), Balance_Pendiente:balancePendiente(r), Estado:r.estado, Responsable:r.responsable,
+      Abonado:totalAbonadoCuenta(r.id), Balance_Pendiente:balancePendiente(r),
+      Actividades_Pendientes_Cantidad: actividadesPendientesDeEstudiante(r.codigoEstudiante).count,
+      Actividades_Pendientes_Monto: actividadesPendientesDeEstudiante(r.codigoEstudiante).total,
+      Estado:r.estado, Responsable:r.responsable,
       Ultima_Gestion:r.fechaUltimaGestion, Proximo_Seguimiento:r.proximoSeguimiento, Observaciones:r.observaciones
     })), `reporte_mensual_${p}.csv`);
   };
-  ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango'].forEach(id=> document.getElementById(id).onchange = draw);
+  ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango','rMostrarPagadas'].forEach(id=> document.getElementById(id).onchange = draw);
   const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
   if (nuevaCuentaBtn) nuevaCuentaBtn.onclick = ()=> openCuentaModal(null, document.getElementById('rPeriodo').value, ()=>{ renderReporte(root); });
-  if (periodos.length) draw(); else document.getElementById('rBody').innerHTML = `<tr><td colspan="19" class="empty">Aún no hay datos importados.</td></tr>`;
+  if (periodos.length) draw(); else document.getElementById('rBody').innerHTML = `<tr><td colspan="20" class="empty">Aún no hay datos importados.</td></tr>`;
 }
 
 function openAbonoModal(cuentaId, onDone){
@@ -1147,8 +1183,11 @@ function openAbonoModal(cuentaId, onDone){
     if (!monto || monto <= 0){ alert('Indique un monto de abono mayor a cero.'); return; }
     DB.abonos.push({ id:cuid(), codigoEstudiante:c.codigoEstudiante, cuentaId:c.id, fecha, monto, observaciones:document.getElementById('aObs').value, registradoPor:SESSION.usuario });
     if (!c.fechaUltimoPago || fecha >= c.fechaUltimoPago) { c.fechaUltimoPago = fecha; c.montoUltimoPago = monto; }
-    await saveAbonos(); await saveCuentas();
-    registrarAuditoria('Abono registrado', `${c.codigoEstudiante} · ${fmtMoney(monto)} · ${fecha}`);
+    await saveAbonos();
+    let seRegularizo = false;
+    if (balancePendiente(c) <= 0 && c.estado !== 'Regularizado'){ c.estado = 'Regularizado'; seRegularizo = true; }
+    await saveCuentas();
+    registrarAuditoria('Abono registrado', `${c.codigoEstudiante} · ${fmtMoney(monto)} · ${fecha}${seRegularizo?' · cuenta marcada como Regularizado automáticamente':''}`);
     closeModal(); if (onDone) onDone();
   };
 }
@@ -1393,8 +1432,15 @@ function previewFamilias(rows){
           <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : `<span class="pill-ok">OK</span>`}</td>
         </tr>`).join('')}</tbody></table>
       </div>
-      <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmFam">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button></div>
+      <div style="margin-top:14px;display:flex;gap:10px;">
+        <button class="btn btn-primary" id="confirmFam">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button>
+        <button class="btn" id="cancelFam">Cancelar</button>
+      </div>
     </div>`;
+  document.getElementById('cancelFam').onclick = ()=>{
+    box.innerHTML = '';
+    const fileInput = document.getElementById('fileFam'); if (fileInput) fileInput.value = '';
+  };
   document.getElementById('confirmFam').onclick = async ()=>{
     let creados=0, actualizados=0;
     analyzed.filter(a=>a.errs.length===0).forEach(a=>{
@@ -1436,8 +1482,15 @@ function previewEstudiantes(rows){
           <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : `<span class="pill-ok">OK</span>`}</td>
         </tr>`).join('')}</tbody></table>
       </div>
-      <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmEst">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button></div>
+      <div style="margin-top:14px;display:flex;gap:10px;">
+        <button class="btn btn-primary" id="confirmEst">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} válidas)</button>
+        <button class="btn" id="cancelEst">Cancelar</button>
+      </div>
     </div>`;
+  document.getElementById('cancelEst').onclick = ()=>{
+    box.innerHTML = '';
+    const fileInput = document.getElementById('fileEst'); if (fileInput) fileInput.value = '';
+  };
   document.getElementById('confirmEst').onclick = async ()=>{
     let creados=0, actualizados=0;
     analyzed.filter(a=>a.errs.length===0).forEach(a=>{
@@ -1512,10 +1565,17 @@ function previewReporte(rows){
             <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : (a.warns.length? `<span class="pill-warn">${a.warns.join('; ')}</span>` : `<span class="pill-ok">OK</span>`)}</td>
           </tr>`).join('')}</tbody></table>
         </div>
-        <div style="margin-top:14px;"><button class="btn btn-primary" id="confirmRep">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} filas)</button></div>
+        <div style="margin-top:14px;display:flex;gap:10px;">
+          <button class="btn btn-primary" id="confirmRep">Confirmar importación (${analyzed.filter(a=>a.errs.length===0).length} filas)</button>
+          <button class="btn" id="cancelRep">Cancelar</button>
+        </div>
       </div>`;
     const chk = document.getElementById('chkCrear');
     if (chk) chk.onchange = ()=>{ crearFaltantes = chk.checked; draw(); };
+    document.getElementById('cancelRep').onclick = ()=>{
+      box.innerHTML = '';
+      const fileInput = document.getElementById('fileRep'); if (fileInput) fileInput.value = '';
+    };
     document.getElementById('confirmRep').onclick = async ()=>{
       let importadas = 0, estCreados = 0;
       analyzed.filter(a=>a.errs.length===0).forEach(a=>{
@@ -2124,6 +2184,13 @@ function renderRespaldo(root){
       ` : `<div class="note">✓ No hay datos de muestra en el sistema — solo información real.</div>`}
     </div>
 
+    <div class="card" style="border-color:var(--rojo);">
+      <h2 style="color:var(--rojo);">⚠ Zona peligrosa: vaciar todos los datos</h2>
+      <p class="small">Elimina <b>TODOS</b> los datos de negocio actuales — reales o de muestra — de familias, estudiantes, cuentas críticas, seguimientos, abonos e inscripciones a actividades. Los <b>usuarios</b>, los <b>catálogos</b> y el <b>historial de auditoría</b> no se ven afectados. Úsalo, por ejemplo, si necesitas reiniciar por completo el sistema para empezar de cero.</p>
+      <p class="small" style="font-weight:700;">Exporta un respaldo antes de continuar — esta acción no se puede deshacer.</p>
+      <button class="btn btn-danger" id="btnVaciarTodo" style="margin-top:8px;">🗑 Vaciar todos los datos de negocio</button>
+    </div>
+
     <div class="card">
       <h2>Lista de verificación antes de lanzar</h2>
       <ul style="margin:0;padding-left:20px;font-size:13.5px;color:var(--ink);line-height:2;">
@@ -2150,6 +2217,10 @@ function renderRespaldo(root){
     if (!confirm('¿Eliminar todos los datos de muestra? Esta acción no se puede deshacer. Los datos reales que ya hayas cargado no se verán afectados.')) return;
     await eliminarDatosDemo();
     renderRespaldo(root);
+  };
+  document.getElementById('btnVaciarTodo').onclick = async ()=>{
+    const ok = await vaciarTodosLosDatos();
+    if (ok) renderRespaldo(root);
   };
   document.getElementById('fileRestaurar').onchange = (e)=>{
     const file = e.target.files[0];

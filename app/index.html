@@ -1063,7 +1063,7 @@ function renderReporte(root){
       <div class="field"><label>Responsable</label><select id="rResp"><option value="">Todos</option>${DB.catalogos.responsables.map(n=>`<option>${n}</option>`).join('')}</select></div>
       <div class="field"><label>Rango de mora</label><select id="rRango"><option value="">Todos</option><option value="3">3 meses</option><option value="4_5">4–5 meses</option><option value="6">6+ meses</option></select></div>
       <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:normal;padding:7px 0;"><input type="checkbox" id="rMostrarPagadas"> Mostrar cuentas ya saldadas/regularizadas</label></div>
-      <div class="field"><label>&nbsp;</label><button class="btn" id="rExport">⭳ Exportar CSV</button></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="rExport" title="Genera un Excel con el mismo formato que la plantilla de importación, listo para editar y volver a subir">⭳ Exportar (reimportable)</button></div>
       ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
     </div>
     <div class="tablewrap">
@@ -1171,16 +1171,7 @@ function renderReporte(root){
     tbody.querySelectorAll('[data-abono]').forEach(btn=>{
       btn.onclick = ()=> openAbonoModal(btn.dataset.abono, draw);
     });
-    document.getElementById('rExport').onclick = ()=> exportCSV(rows.map(r=>({
-      Codigo:r.codigoEstudiante, Estudiante:r._est?r._est.nombre:'', Nivel:r._est?r._est.nivel:'', Grado:r._est?r._est.grado:'',
-      Internado:r._est?r._est.internado:'', Familia: (r._est?(familiaByCodigo(r._est.codigoFamilia)||{}).responsable:''),
-      Meses_Adeudados:r.mesesAdeudados, Balance_Anio_Anterior:r.balanceAnioAnterior, Balance_Meses_Actuales:r.balance,
-      Abonado:totalAbonadoCuenta(r.id), Balance_Pendiente:balancePendiente(r),
-      Actividades_Pendientes_Cantidad: actividadesPendientesDeEstudiante(r.codigoEstudiante).count,
-      Actividades_Pendientes_Monto: actividadesPendientesDeEstudiante(r.codigoEstudiante).total,
-      Estado:r.estado, Responsable:r.responsable,
-      Ultima_Gestion:r.fechaUltimaGestion, Proximo_Seguimiento:r.proximoSeguimiento, Observaciones:r.observaciones
-    })), `reporte_mensual_${p}.csv`);
+    document.getElementById('rExport').onclick = ()=> exportarReporteReimportable(rows, `reporte_mensual_${p}.xlsx`);
   };
   ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango','rMostrarPagadas'].forEach(id=> document.getElementById(id).onchange = draw);
   const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
@@ -1336,6 +1327,24 @@ function exportCSV(rows, filename){
   const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>`"${String(r[h]??'').replace(/"/g,'""')}"`).join(','))).join('\n');
   const blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+}
+
+// Exporta el Reporte Mensual (filtrado) con las MISMAS columnas que la plantilla de importación
+// (Codigo_Estudiante, Periodo_Reporte, Meses_Adeudados, etc.), en .xlsx, para poder editarlo en
+// Excel y volver a subirlo directamente desde "Importar Datos" sin tener que acomodar columnas.
+function exportarReporteReimportable(rows, filename){
+  if (!rows.length){ alert('No hay filas para exportar con estos filtros.'); return; }
+  const headers = ["Codigo_Estudiante*","Periodo_Reporte(AAAA-MM)*","Meses_Adeudados*","Balance_Anio_Anterior","Balance_Meses_Actuales*","Fecha_Ultimo_Pago","Monto_Ultimo_Pago","Estado_Gestion*","Responsable_Asignado*","Fecha_Ultima_Gestion","Proximo_Seguimiento","Observaciones"];
+  const datos = rows.map(r=>[
+    r.codigoEstudiante, r.periodo, r.mesesAdeudados, r.balanceAnioAnterior||0, r.balance,
+    r.fechaUltimoPago||'', r.montoUltimoPago||'', r.estado, r.responsable||'',
+    r.fechaUltimaGestion||'', r.proximoSeguimiento||'', r.observaciones||''
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...datos]);
+  ws['!cols'] = headers.map(()=>({wch:20}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Reporte_Mensual");
+  XLSX.writeFile(wb, filename);
 }
 
 /* =========================================================================

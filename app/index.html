@@ -223,7 +223,7 @@ const DB = {
   catalogos: {
     niveles: ["Nivel Inicial","Nivel Primario","Nivel Secundario"],
     grados: ["1er Grado A","1er Grado B","2do Grado A","3er Grado A","1er Año A","1er Año B","2do Año A"],
-    actividades: ["Fútbol","Música","Robótica","Transporte","Natación"],
+    actividades: [{nombre:"Fútbol",costo:1500},{nombre:"Música",costo:1200},{nombre:"Robótica",costo:2500},{nombre:"Transporte",costo:3000},{nombre:"Natación",costo:1800},{nombre:"Inglés",costo:1500}],
     estadosCuenta: ["Pendiente","Contactado","Compromiso de pago","Pago parcial","Regularizado","Sin respuesta"],
     mediosContacto: ["Llamada","WhatsApp","Correo","Reunión","Visita"],
     resultadosGestion: ["No respondió","Promesa de pago","Pagó","Reprogramó","Número incorrecto","Pendiente"],
@@ -235,6 +235,12 @@ let STORAGE_OK = true;
 let STORAGE_MODE = 'checking';
 let STORAGE_DIAG = { protocolo:'', supabaseIntentado:false, supabaseFunciona:false, cloudIntentado:false, cloudFunciona:false, idbIntentado:false, idbFunciona:false, localIntentado:false, localFunciona:false, detalle:'' };
 let MEMORY_STORE = {}; // último recurso: sobrevive mientras la pestaña esté abierta, se pierde al recargar
+// Conexión de fábrica: cada dispositivo que abra esta copia de la app se conecta automáticamente
+// a este proyecto de Supabase, sin que nadie tenga que configurarlo a mano. La anon key está
+// diseñada por Supabase para ser pública (se protege con las reglas de seguridad del proyecto,
+// no ocultándola) — por eso es seguro incluirla directamente aquí.
+const SUPABASE_DEFAULT_URL = 'https://rpxjysxherdvfmfmqqjr.supabase.co';
+const SUPABASE_DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJweGp5c3hoZXJkdmZtZm1xcWpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDg4NjcsImV4cCI6MjA5OTUyNDg2N30.SmseoiVK6eZuS5b0F6w-PkJLBHQ2pImCFqTDas0G2BE';
 let SUPABASE_URL = null;
 let SUPABASE_ANON_KEY = null;
 
@@ -245,6 +251,8 @@ async function cargarConfigSupabase(){
     try{ const raw = localStorage.getItem('ccc_local:ccc:supabase_config'); if (raw) cfg = JSON.parse(raw); }catch(e){}
   }
   if (cfg && cfg.url && cfg.key){ SUPABASE_URL = cfg.url; SUPABASE_ANON_KEY = cfg.key; }
+  else if (cfg && cfg.desconectadoManualmente){ SUPABASE_URL = null; SUPABASE_ANON_KEY = null; }
+  else if (SUPABASE_DEFAULT_URL && SUPABASE_DEFAULT_KEY){ SUPABASE_URL = SUPABASE_DEFAULT_URL; SUPABASE_ANON_KEY = SUPABASE_DEFAULT_KEY; }
 }
 // Acepta el Project URL tal cual lo copien, incluso si pegaron de más (ej. ".../rest/v1/" al final,
 // que es común porque así aparece en algunas pantallas de la documentación de Supabase).
@@ -262,8 +270,11 @@ async function guardarConfigSupabase(url, key){
 }
 async function borrarConfigSupabase(){
   SUPABASE_URL = null; SUPABASE_ANON_KEY = null;
-  try{ await idbSet('ccc:supabase_config', null); }catch(e){}
-  try{ localStorage.removeItem('ccc_local:ccc:supabase_config'); }catch(e){}
+  // Se guarda un marcador de "desconectado a propósito" (en vez de simplemente borrar la llave)
+  // para que este dispositivo no vuelva a conectarse solo al proyecto de fábrica en el próximo uso.
+  const marcador = { url:null, key:null, desconectadoManualmente:true };
+  try{ await idbSet('ccc:supabase_config', marcador); }catch(e){}
+  try{ localStorage.setItem('ccc_local:ccc:supabase_config', JSON.stringify(marcador)); }catch(e){}
 }
 
 /* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
@@ -546,6 +557,30 @@ async function recargarDatosDeNegocio(){
   }
   if (migrated) await saveUsuarios();
   DB.catalogos = await dbGet('ccc:catalogos', DB.catalogos);
+  // Migración: el catálogo de actividades pasó de ser solo nombres a tener nombre + costo.
+  let catalogosMigrados = false;
+  if (Array.isArray(DB.catalogos.actividades)){
+    DB.catalogos.actividades = DB.catalogos.actividades.map(a=>{
+      if (typeof a === 'string'){ catalogosMigrados = true; return {nombre:a, costo:0}; }
+      return a;
+    });
+  }
+  if (catalogosMigrados) { await dbSet('ccc:catalogos', DB.catalogos); }
+  // Migración: las inscripciones a actividades ya guardadas no tenían costo ni estado de pago.
+  let actMigradas = false;
+  DB.estudianteActividades.forEach(ea=>{
+    if (!ea.id){ ea.id = cuid(); actMigradas = true; }
+    if (ea.costo === undefined){ ea.costo = costoDeActividad(ea.actividad); actMigradas = true; }
+    if (ea.pagado === undefined){ ea.pagado = false; actMigradas = true; }
+    if (ea.fechaPago === undefined){ ea.fechaPago = ''; actMigradas = true; }
+    if (ea.observaciones === undefined){ ea.observaciones = ''; actMigradas = true; }
+  });
+  if (actMigradas) { await dbSet('ccc:estudiante_actividades', DB.estudianteActividades); }
+}
+function costoDeActividad(nombre){
+  const a = DB.catalogos.actividades.find(x=> (typeof x==='string'?x:x.nombre) === nombre);
+  if (!a) return 0;
+  return typeof a === 'string' ? 0 : Number(a.costo||0);
 }
 function seedSampleData(){
   DB.familias = [
@@ -850,7 +885,7 @@ function renderDashboard(root){
         <select id="dashNivel"><option value="">Todos</option>${DB.catalogos.niveles.map(n=>`<option>${n}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Actividad</label>
-        <select id="dashActividad"><option value="">Todas</option>${DB.catalogos.actividades.map(a=>`<option>${a}</option>`).join('')}</select>
+        <select id="dashActividad"><option value="">Todas</option>${DB.catalogos.actividades.map(a=>`<option>${a.nombre}</option>`).join('')}</select>
       </div>
     </div>
     <div id="dashBody"></div>
@@ -887,6 +922,8 @@ function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
   });
   const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && new Date(r.proximoSeguimiento) < new Date()));
   const top10 = [...rows].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
+  const actividadesPendientes = DB.estudianteActividades.filter(ea=>!ea.pagado).map(ea=>({...ea, _est: estudianteByCodigo(ea.codigoEstudiante)}));
+  const montoActividadesPendientes = actividadesPendientes.reduce((s,a)=>s+Number(a.costo||0),0);
 
   const maxRango = Math.max(rangos.r3, rangos.r4_5, rangos.r6, 1);
   body.innerHTML = `
@@ -933,6 +970,18 @@ function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
           </tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Actividades pendientes de pago <span class="n">${actividadesPendientes.length} · ${fmtMoney(montoActividadesPendientes)}</span></h2>
+      ${actividadesPendientes.length===0 ? '<div class="small">No hay actividades pendientes de pago.</div>' :
+        `<div class="tablewrap" style="max-height:280px;">
+          <table><thead><tr><th>Estudiante</th><th>Familia</th><th>Actividad</th><th>Periodo</th><th>Costo</th></tr></thead>
+          <tbody>${actividadesPendientes.slice(0,50).map(a=>{ const fam = a._est ? familiaByCodigo(a._est.codigoFamilia) : null; return `<tr>
+            <td>${a._est?a._est.nombre:a.codigoEstudiante}</td><td>${fam?fam.responsable:''}</td>
+            <td>${a.actividad}</td><td class="mono">${a.periodo}</td><td class="mono">${fmtMoney(a.costo)}</td>
+          </tr>`; }).join('')}</tbody></table>
+        </div>`}
     </div>
   `;
   const goRespaldo = ()=>{ currentView='respaldo'; renderAll(); };
@@ -1543,8 +1592,22 @@ function renderFichas(root){
       ${!editable?'<p class="small" style="margin-top:8px;">Modo solo lectura para su rol.</p>':''}
       <hr class="sep">
       <h2>Actividades</h2>
-      <div class="catlist">${acts.length? acts.map(a=>`<span class="cattag">${a.actividad} · ${a.periodo} (${a.estado})</span>`).join('') : '<span class="small">Sin actividades registradas.</span>'}</div>
-      ${editable?`<div class="addrow"><select id="actSel">${DB.catalogos.actividades.map(a=>`<option>${a}</option>`).join('')}</select><input id="actPeriodo" placeholder="Periodo (ej. 2026-09)"><button class="btn btn-sm" id="actAdd">Agregar actividad</button></div>`:''}
+      <div class="tablewrap" style="max-height:240px;">
+        <table><thead><tr><th>Actividad</th><th>Periodo</th><th>Costo</th><th>Estado de pago</th><th>Fecha de pago</th>${editable?'<th></th>':''}</tr></thead>
+        <tbody>${acts.length ? acts.map(a=>`<tr>
+          <td>${a.actividad}</td>
+          <td class="mono">${a.periodo}</td>
+          <td class="mono">${fmtMoney(a.costo)}</td>
+          <td>${a.pagado ? `<span class="badge b-verde"><span class="dot dot-verde"></span>Pagado</span>` : `<span class="badge b-rojo"><span class="dot dot-rojo"></span>Pendiente</span>`}</td>
+          <td class="mono">${a.fechaPago||'—'}</td>
+          ${editable?`<td><button class="btn btn-sm ${a.pagado?'':'btn-primary'}" data-togglepago="${a.id}">${a.pagado?'Marcar pendiente':'Marcar pagado'}</button></td>`:''}
+        </tr>`).join('') : `<tr><td colspan="${editable?6:5}" class="empty">Sin actividades registradas.</td></tr>`}</tbody></table>
+      </div>
+      ${editable?`<div class="addrow">
+        <select id="actSel">${DB.catalogos.actividades.map(a=>`<option value="${a.nombre}">${a.nombre} — ${fmtMoney(a.costo)}</option>`).join('')}</select>
+        <input id="actPeriodo" placeholder="Periodo (ej. 2026-09)">
+        <button class="btn btn-sm" id="actAdd">Agregar actividad</button>
+      </div>`:''}
       <hr class="sep">
       <h2>Historial de balances mes a mes</h2>
       <div class="tablewrap" style="max-height:240px;"><table><thead><tr><th>Periodo</th><th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Abonado</th><th>Pendiente</th><th>Estado</th></tr></thead>
@@ -1569,9 +1632,26 @@ function renderFichas(root){
       if (actAdd) actAdd.onclick = async ()=>{
         const periodoVal = document.getElementById('actPeriodo').value.trim();
         if (!periodoVal){ alert('Indique el periodo de la actividad.'); return; }
-        DB.estudianteActividades.push({codigoEstudiante:est.codigo, actividad:document.getElementById('actSel').value, periodo:periodoVal, estado:'Activa'});
-        await saveActividades(); drawDetail(est.codigo);
+        const nombreAct = document.getElementById('actSel').value;
+        DB.estudianteActividades.push({
+          id: cuid(), codigoEstudiante:est.codigo, actividad:nombreAct, periodo:periodoVal, estado:'Activa',
+          costo: costoDeActividad(nombreAct), pagado:false, fechaPago:'', observaciones:''
+        });
+        await saveActividades();
+        registrarAuditoria('Actividad inscrita', `${est.codigo} · ${nombreAct} · ${periodoVal}`);
+        drawDetail(est.codigo);
       };
+      root.querySelectorAll('[data-togglepago]').forEach(btn=>{
+        btn.onclick = async ()=>{
+          const ea = DB.estudianteActividades.find(x=>x.id===btn.dataset.togglepago);
+          if (!ea) return;
+          ea.pagado = !ea.pagado;
+          ea.fechaPago = ea.pagado ? new Date().toISOString().slice(0,10) : '';
+          await saveActividades();
+          registrarAuditoria(ea.pagado?'Actividad marcada como pagada':'Actividad marcada como pendiente', `${est.codigo} · ${ea.actividad} · ${ea.periodo}`);
+          drawDetail(est.codigo);
+        };
+      });
       const addAbonoBtn = document.getElementById('fichaAddAbono');
       if (addAbonoBtn) addAbonoBtn.onclick = ()=> openAbonoModal(cuentasEst[0].id, ()=> drawDetail(est.codigo));
     }
@@ -1707,7 +1787,6 @@ function renderHistorial(root){
 const CAT_META = [
   {key:'niveles', label:'Niveles académicos'},
   {key:'grados', label:'Grados / Secciones'},
-  {key:'actividades', label:'Actividades disponibles'},
   {key:'estadosCuenta', label:'Estados de cuenta'},
   {key:'mediosContacto', label:'Medios de contacto'},
   {key:'resultadosGestion', label:'Resultados de gestión'},
@@ -1716,6 +1795,19 @@ const CAT_META = [
 function renderCatalogos(root){
   const canEdit = perm('editarCatalogos');
   root.innerHTML = `${!canEdit?'<div class="note">Su rol tiene acceso de solo lectura a los catálogos. Solo el Administrador puede editarlos.</div>':''}
+    <div class="card">
+      <h2>Actividades disponibles y su costo</h2>
+      <p class="small">El costo que se define aquí es el que se usa por defecto al inscribir a un estudiante en la actividad. Cambiar el costo aquí no afecta inscripciones que ya existían.</p>
+      <div class="tablewrap" style="max-height:280px;">
+        <table><thead><tr><th>Actividad</th><th>Costo</th>${canEdit?'<th></th>':''}</tr></thead>
+        <tbody>${DB.catalogos.actividades.map((a,i)=>`<tr>
+          <td>${canEdit?`<input data-actnombre="${i}" value="${a.nombre}" style="border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:100%;">`:a.nombre}</td>
+          <td>${canEdit?`<input type="number" min="0" step="0.01" data-actcosto="${i}" value="${a.costo}" style="border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:110px;">`:fmtMoney(a.costo)}</td>
+          ${canEdit?`<td><button class="btn btn-sm btn-danger" data-actdel="${i}">Eliminar</button></td>`:''}
+        </tr>`).join('') || `<tr><td colspan="3" class="empty">Sin actividades definidas.</td></tr>`}</tbody></table>
+      </div>
+      ${canEdit?`<div class="addrow"><input id="nuevaActNombre" placeholder="Nombre de la actividad"><input id="nuevaActCosto" type="number" min="0" step="0.01" placeholder="Costo" style="max-width:120px;"><button class="btn btn-sm" id="nuevaActBtn">Agregar actividad</button></div>`:''}
+    </div>
     <div class="grid grid-2">
       ${CAT_META.map(m=>`
         <div class="card">
@@ -1725,6 +1817,27 @@ function renderCatalogos(root){
         </div>`).join('')}
     </div>`;
   if (!canEdit) return;
+  root.querySelectorAll('[data-actnombre]').forEach(inp=>{
+    inp.onchange = async ()=>{ DB.catalogos.actividades[Number(inp.dataset.actnombre)].nombre = inp.value.trim(); await saveCatalogos(); };
+  });
+  root.querySelectorAll('[data-actcosto]').forEach(inp=>{
+    inp.onchange = async ()=>{ DB.catalogos.actividades[Number(inp.dataset.actcosto)].costo = Number(inp.value||0); await saveCatalogos(); };
+  });
+  root.querySelectorAll('[data-actdel]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      if (!confirm('¿Eliminar esta actividad del catálogo? Los estudiantes ya inscritos conservan su registro histórico.')) return;
+      DB.catalogos.actividades.splice(Number(btn.dataset.actdel),1);
+      await saveCatalogos(); renderCatalogos(root);
+    };
+  });
+  const nuevaActBtn = document.getElementById('nuevaActBtn');
+  if (nuevaActBtn) nuevaActBtn.onclick = async ()=>{
+    const nombre = document.getElementById('nuevaActNombre').value.trim();
+    const costo = Number(document.getElementById('nuevaActCosto').value||0);
+    if (!nombre){ alert('Indique el nombre de la actividad.'); return; }
+    DB.catalogos.actividades.push({nombre, costo});
+    await saveCatalogos(); renderCatalogos(root);
+  };
   root.querySelectorAll('[data-cat]').forEach(btn=>{
     btn.onclick = async ()=>{ DB.catalogos[btn.dataset.cat].splice(Number(btn.dataset.i),1); await saveCatalogos(); renderCatalogos(root); };
   });
@@ -1862,9 +1975,16 @@ function renderBaseDeDatos(root){
     <div class="card">
       <h2>Estado actual</h2>
       <p style="font-weight:700;color:${conectado?'var(--verde)':(configurado?'var(--rojo)':'var(--muted)')};">
-        ${conectado ? '✓ Conectado y activo — este sistema está usando Supabase ahora mismo.' : (configurado ? '✕ Configurado, pero la última verificación falló (revise el diagnóstico en "Respaldo de Datos").' : 'No configurado. La app sigue usando su almacenamiento habitual.')}
+        ${conectado ? '✓ Conectado y activo — este sistema está usando Supabase ahora mismo.' : (configurado ? '✕ Configurado, pero no está activo ahora mismo.' : 'No configurado. La app sigue usando su almacenamiento habitual.')}
       </p>
       ${configurado ? `<p class="small mono">${SUPABASE_URL}</p>` : ''}
+      ${(configurado && !conectado) ? `
+        <div class="alertbox" style="margin-top:10px;">
+          <b>Modo actual en su lugar:</b> ${ {supabase:'Supabase', cloud:'Nube de Claude.ai', indexeddb:'IndexedDB de este dispositivo', local:'localStorage de este navegador', memory:'Sin guardar', checking:'Verificando…'}[STORAGE_MODE] || STORAGE_MODE }<br>
+          <b>Motivo técnico:</b> ${STORAGE_DIAG.supabaseIntentado ? (STORAGE_DIAG.detalle || 'Se probó la conexión pero no se pudo confirmar la escritura/lectura (sin mensaje de error específico).') : 'No se llegó a intentar la conexión con estos datos guardados (revise que el Project URL y la anon key sean correctos).'}
+        </div>
+        <button class="btn btn-sm" id="sbReintentar" style="margin-top:10px;">🔄 Reintentar conexión ahora</button>
+      ` : ''}
     </div>
     <div class="card">
       <h2>${configurado ? 'Actualizar conexión' : 'Conectar un proyecto de Supabase'}</h2>
@@ -1881,6 +2001,13 @@ function renderBaseDeDatos(root){
       <p class="small" style="margin-top:12px;">Antes de conectar, cree su proyecto gratis en <span class="mono">supabase.com</span> y ejecute el script SQL de la tabla <span class="mono">kv_store</span> que aparece en la guía de arquitectura (sección "Ruta recomendada"). La anon key es pública por diseño — está protegida por las reglas de seguridad (RLS) que usted define en Supabase, no es un secreto que deba ocultar del navegador.</p>
     </div>
   `;
+  const btnReintentar = document.getElementById('sbReintentar');
+  if (btnReintentar) btnReintentar.onclick = async ()=>{
+    btnReintentar.textContent = 'Reintentando…';
+    await verificarAlmacenamiento();
+    await recargarDatosDeNegocio();
+    renderAll();
+  };
   document.getElementById('sbProbar').onclick = async ()=>{
     const url = document.getElementById('sbUrl').value;
     const key = document.getElementById('sbKey').value;
@@ -2071,11 +2198,18 @@ function cerrarSesion(mensaje){
 }
 
 async function eliminarTodosLosUsuarios(){
-  const ok = confirm('Esto eliminará TODAS las cuentas de usuario actuales. La próxima vez que se abra la app, se pedirá crear una nueva cuenta de Administrador desde cero.\n\n¿Desea continuar?');
-  if (!ok) return;
+  // Protección crítica: si el almacenamiento activo es compartido (Supabase o la nube de Claude.ai),
+  // esta acción borraría las cuentas de TODO el equipo, desde cualquier dispositivo, sin ninguna
+  // credencial. Por eso queda deshabilitada por completo en modo compartido — ver mensaje en pantalla.
+  if (STORAGE_MODE === 'supabase' || STORAGE_MODE === 'cloud'){
+    alert('Esta opción está deshabilitada porque este dispositivo está conectado a una base de datos compartida con su equipo. Borrar usuarios aquí afectaría a todos, no solo a este dispositivo.\n\nSi de verdad perdió el acceso a todas las cuentas, pida a la persona que administra ' + (STORAGE_MODE==='supabase' ? 'el proyecto de Supabase' : 'Claude.ai') + ' que elimine manualmente la cuenta afectada, o restaure un respaldo (.json) desde otro dispositivo que sí tenga sesión activa.');
+    return;
+  }
+  const frase = prompt('Esto eliminará TODAS las cuentas de usuario guardadas EN ESTE DISPOSITIVO. La próxima vez que se abra la app aquí, se pedirá crear una cuenta de Administrador desde cero.\n\nEsta acción no se puede deshacer.\n\nPara confirmar, escriba exactamente: ELIMINAR');
+  if (frase !== 'ELIMINAR') { if (frase !== null) alert('No coincide con "ELIMINAR". No se hizo ningún cambio.'); return; }
   DB.usuarios = [];
   await saveUsuarios();
-  registrarAuditoria('Reinicio de usuarios', 'Se eliminaron todas las cuentas desde la pantalla de acceso.');
+  registrarAuditoria('Reinicio de usuarios', 'Se eliminaron todas las cuentas locales desde la pantalla de acceso.');
   loginState = { step:'setup-admin', error:'', ok:'', pendingUser:null };
   renderLogin();
 }
@@ -2177,7 +2311,10 @@ function renderLogin(){
       <div class="login-actions"><button class="btn btn-primary" id="loSubmit">Ingresar</button></div>
       <div class="login-link" id="loForgot">¿Olvidó su contraseña?</div>
       <div class="login-note">La clave se recupera respondiendo su pregunta de seguridad. Este sistema no envía correos reales (no cuenta con servidor de correo).</div>
-      <div class="login-link" id="loFactoryReset" style="color:var(--rojo);margin-top:10px;">¿Perdió el acceso a todas las cuentas? Reiniciar usuarios</div>
+      ${(STORAGE_MODE === 'supabase' || STORAGE_MODE === 'cloud')
+        ? `<div class="login-note" style="margin-top:10px;">¿Perdió el acceso a todas las cuentas de su equipo? Pida a quien administra ${STORAGE_MODE==='supabase'?'el proyecto de Supabase':'Claude.ai'} que la recupere — por seguridad, esta opción no puede hacerse desde aquí cuando los datos son compartidos.</div>`
+        : `<div class="login-link" id="loFactoryReset" style="color:var(--rojo);margin-top:10px;">¿Perdió el acceso a todas las cuentas de este dispositivo? Reiniciar usuarios locales</div>`
+      }
       <div class="login-link" id="loIrConectarBD2" style="margin-top:10px;">¿Necesita conectarse a la base de datos de su equipo (Supabase)?</div>
     `);
     document.getElementById('loIrConectarBD2').onclick = ()=>{ loginState = { step:'conectar-bd', error:'', ok:'', pendingUser:null, volverA:'login' }; renderLogin(); };
@@ -2224,7 +2361,8 @@ function renderLogin(){
     document.getElementById('loSubmit').onclick = submit;
     box.querySelectorAll('input').forEach(inp=> inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
     document.getElementById('loForgot').onclick = ()=>{ loginState = {step:'forgot-email', error:'', ok:'', pendingUser:null}; renderLogin(); };
-    document.getElementById('loFactoryReset').onclick = eliminarTodosLosUsuarios;
+    const btnFactoryReset = document.getElementById('loFactoryReset');
+    if (btnFactoryReset) btnFactoryReset.onclick = eliminarTodosLosUsuarios;
   }
 
   else if (s.step === 'forgot-email'){

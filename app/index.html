@@ -1141,13 +1141,18 @@ function renderReporte(root){
       const abonado = totalAbonadoCuenta(r.id);
       const pendiente = balancePendiente(r);
       const actPend = actividadesPendientesDeEstudiante(r.codigoEstudiante);
+      // Si el estudiante no está vinculado (código no coincide con ninguno del sistema), se
+      // muestra igual el nombre/familia que traía el archivo importado, en vez de dejarlo en blanco.
+      const nombreMostrar = r._est ? r._est.nombre : (r.nombreEstudianteImportado || '');
+      const familiaMostrar = fam ? fam.responsable : (r.nombreFamiliaImportado || r.codigoFamiliaImportado || '');
+      const sinVincular = !r._est;
       return `<tr>
         <td class="mono">${r.codigoEstudiante}</td>
-        <td>${r._est?r._est.nombre:'<span class="pill-error">No encontrado</span>'}</td>
+        <td>${nombreMostrar || '<span class="small">—</span>'}${sinVincular?` <span class="pill-warn" title="No se encontró un estudiante con este código en el sistema — verifique que el código coincida exactamente con el de Estudiantes/Familias">⚠ No vinculado</span>`:''}</td>
         <td>${r._est?r._est.nivel:''}</td>
         <td>${r._est?r._est.grado:''}</td>
         <td>${r._est?r._est.internado:''}</td>
-        <td>${fam?fam.responsable:''}</td>
+        <td>${familiaMostrar || ''}</td>
         <td class="mono">${fam?fam.tel1:''}</td>
         <td class="mono">${r.mesesAdeudados}</td>
         <td class="mono">${fmtMoney(r.balanceAnioAnterior)}</td>
@@ -1377,7 +1382,11 @@ function exportarReporteReimportable(rows, filename){
     const est = r._est || estudianteByCodigo(r.codigoEstudiante);
     const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
     return [
-      r.codigoEstudiante, est?est.nombre:'', est?est.codigoFamilia:'', fam?fam.responsable:'', est?est.nivel:'', est?est.grado:'',
+      r.codigoEstudiante,
+      est?est.nombre:(r.nombreEstudianteImportado||''),
+      est?est.codigoFamilia:(r.codigoFamiliaImportado||''),
+      fam?fam.responsable:(r.nombreFamiliaImportado||''),
+      est?est.nivel:'', est?est.grado:'',
       r.periodo, r.mesesAdeudados, r.balanceAnioAnterior||0, r.balance,
       r.fechaUltimoPago||'', r.montoUltimoPago||'', r.estado, r.responsable||'',
       r.fechaUltimaGestion||'', r.proximoSeguimiento||'', r.observaciones||''
@@ -1682,19 +1691,25 @@ function previewReporte(rows){
       const fileInput = document.getElementById('fileRep'); if (fileInput) fileInput.value = '';
     };
     document.getElementById('confirmRep').onclick = async ()=>{
-      let importadas = 0, estCreados = 0, familiasVinculadas = 0;
-      let estudiantesModificados = false;
+      let importadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
+      let estudiantesModificados = false, catalogosModificados = false;
       analyzed.filter(a=>a.errs.length===0).forEach(a=>{
         const r = a.r;
         if (!a.existe){
-          if (!crearFaltantes) return;
-          // Si el archivo trae Codigo_Familia y esa familia ya existe, el estudiante nuevo
-          // se crea ya vinculado a ella automáticamente — sin necesidad de un paso aparte.
-          const familiaInicial = (r.Codigo_Familia && a.familiaExiste) ? normCode(r.Codigo_Familia) : '';
-          DB.estudiantes.push({codigo:r.Codigo_Estudiante, nombre:r.Nombre_Estudiante||'(Pendiente de completar)', codigoFamilia:familiaInicial, nivel:r.Nivel||'', grado:r.Grado||'', internado:'No', internadoInicio:'', internadoFin:'', estado:'Activo'});
-          estCreados++;
-          estudiantesModificados = true;
-          if (familiaInicial) familiasVinculadas++;
+          if (crearFaltantes){
+            // Si el archivo trae Codigo_Familia y esa familia ya existe, el estudiante nuevo
+            // se crea ya vinculado a ella automáticamente — sin necesidad de un paso aparte.
+            const familiaInicial = (r.Codigo_Familia && a.familiaExiste) ? normCode(r.Codigo_Familia) : '';
+            DB.estudiantes.push({codigo:r.Codigo_Estudiante, nombre:r.Nombre_Estudiante||'(Pendiente de completar)', codigoFamilia:familiaInicial, nivel:r.Nivel||'', grado:r.Grado||'', internado:'No', internadoInicio:'', internadoFin:'', estado:'Activo'});
+            estCreados++;
+            estudiantesModificados = true;
+            if (familiaInicial) familiasVinculadas++;
+          } else {
+            // No se creó el estudiante formalmente, pero el registro de deuda SÍ se importa —
+            // se muestra con los datos que traía el archivo, marcado como "no vinculado", para
+            // que Dirección no pierda de vista quién debe aunque falte completar su ficha.
+            sinVincular++;
+          }
         } else if (a.familiaCambia && a.familiaExiste){
           // Estudiante ya existente: si el código de familia del archivo coincide con una familia
           // real y es distinto al que tenía, se actualiza el vínculo automáticamente.
@@ -1703,17 +1718,28 @@ function previewReporte(rows){
           estudiantesModificados = true;
           familiasVinculadas++;
         }
+        // Si el responsable indicado en el archivo no está todavía en el catálogo, se agrega solo
+        // — así aparece disponible de inmediato en el desplegable de "Responsable" del Reporte Mensual.
+        if (r.Responsable_Asignado && !DB.catalogos.responsables.includes(r.Responsable_Asignado)){
+          DB.catalogos.responsables.push(r.Responsable_Asignado);
+          catalogosModificados = true;
+          responsablesNuevos++;
+        }
         DB.cuentas.push({
           id: cuid(), codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
           balanceAnioAnterior:Number(r.Balance_Anio_Anterior||0), balance:Number(r.Balance_Meses_Actuales), fechaUltimoPago:r.Fecha_Ultimo_Pago||'', montoUltimoPago:r.Monto_Ultimo_Pago||'',
           estado:r.Estado_Gestion, responsable:r.Responsable_Asignado, fechaUltimaGestion:r.Fecha_Ultima_Gestion||'',
-          proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||''
+          proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||'',
+          // Respaldo: si por algún motivo el estudiante no llega a vincularse (código distinto,
+          // no encontrado, etc.), el Reporte Mensual igual muestra estos datos en vez de dejarlos vacíos.
+          nombreEstudianteImportado: r.Nombre_Estudiante||'', nombreFamiliaImportado: r.Nombre_Familia||'', codigoFamiliaImportado: r.Codigo_Familia||''
         });
         importadas++;
       });
-      await saveCuentas(); if (estudiantesModificados) await saveEstudiantes();
-      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados automáticamente`);
-      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>`;
+      await saveCuentas(); if (estudiantesModificados) await saveEstudiantes(); if (catalogosModificados) await saveCatalogos();
+      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
+      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
+      ${sinVincular?`<div class="alertbox">${sinVincular} registro(s) se importaron con el nombre/familia del archivo, pero <b>no se pudieron vincular a un estudiante existente</b> (el "Codigo_Estudiante" del archivo no coincide con ninguno del sistema). Búsquelos en el Reporte Mensual con la etiqueta "⚠ No vinculado" — revise que el código coincida exactamente con el de "Estudiantes/Familias", o marque "Crear automáticamente" la próxima vez.</div>`:''}`;
     };
   }
   draw();

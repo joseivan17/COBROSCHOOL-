@@ -279,9 +279,17 @@ async function borrarConfigSupabase(){
 
 /* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
    para no depender de un CDN fuera de lo permitido en este entorno. ---------- */
+// Tiempo máximo de espera para cualquier llamada a Supabase. Sin esto, una red lenta o que
+// bloquee la conexión en silencio podía dejar el arranque de la app esperando indefinidamente.
+const SUPABASE_TIMEOUT_MS = 7000;
+function fetchConTimeout(url, options){
+  const controller = new AbortController();
+  const timer = setTimeout(()=> controller.abort(), SUPABASE_TIMEOUT_MS);
+  return fetch(url, { ...(options||{}), signal: controller.signal }).finally(()=> clearTimeout(timer));
+}
 async function supabaseFetch(path, options){
   options = options || {};
-  return fetch(SUPABASE_URL + path, {
+  return fetchConTimeout(SUPABASE_URL + path, {
     ...options,
     headers: {
       apikey: SUPABASE_ANON_KEY,
@@ -295,13 +303,14 @@ async function supabaseProbar(url, key){
   const base = normalizarSupabaseUrl(url);
   if (!base || !key) return { ok:false, error:'Complete el Project URL y la anon key.' };
   try{
-    const res = await fetch(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
+    const res = await fetchConTimeout(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
     if (res.status === 200) return { ok:true };
     if (res.status === 404 || res.status === 400) return { ok:false, error:'No se encontró la tabla "kv_store". Verifique que ejecutó el script SQL en su proyecto de Supabase (ver ARQUITECTURA_Y_ESCALABILIDAD.md).' };
     if (res.status === 401 || res.status === 403) return { ok:false, error:'Credenciales rechazadas (código '+res.status+'). Verifique el Project URL y la anon key.' };
     return { ok:false, error:'Respuesta inesperada del servidor (código ' + res.status + ').' };
   }catch(e){
-    return { ok:false, error:'No se pudo conectar: ' + (e && e.message || e) };
+    const motivo = (e && e.name === 'AbortError') ? `Se agotó el tiempo de espera (${SUPABASE_TIMEOUT_MS/1000}s) intentando conectar.` : ('No se pudo conectar: ' + (e && e.message || e));
+    return { ok:false, error:motivo };
   }
 }
 async function supabaseGet(key){
@@ -576,6 +585,10 @@ async function recargarDatosDeNegocio(){
     if (ea.observaciones === undefined){ ea.observaciones = ''; actMigradas = true; }
   });
   if (actMigradas) { await dbSet('ccc:estudiante_actividades', DB.estudianteActividades); }
+  // Auto-relación: cualquier estudiante sin familia asignada, cuyo código coincida exactamente
+  // con el de una familia ya existente, se vincula solo — cubre datos cargados antes de este arreglo.
+  const vinculadosAutomaticamente = vincularEstudiantesPorCodigoCoincidente();
+  if (vinculadosAutomaticamente) { await dbSet('ccc:estudiantes', DB.estudiantes); }
 }
 function costoDeActividad(nombre){
   const a = DB.catalogos.actividades.find(x=> (typeof x==='string'?x:x.nombre) === nombre);
@@ -777,6 +790,18 @@ function fmtMoney(n){
 function normCode(s){ return String(s||'').trim().toUpperCase(); }
 function estudianteByCodigo(cod){ const c=normCode(cod); return DB.estudiantes.find(e=>normCode(e.codigo)===c); }
 function familiaByCodigo(cod){ const c=normCode(cod); return DB.familias.find(f=>normCode(f.codigo)===c); }
+// Si un estudiante y una familia comparten exactamente el mismo código (convención usada por
+// algunas instituciones: un mismo código identifica al estudiante y a su familia), se vinculan
+// automáticamente — sin pisar un vínculo que el estudiante ya tuviera con otra familia distinta.
+function vincularEstudiantesPorCodigoCoincidente(){
+  let vinculados = 0;
+  DB.estudiantes.forEach(est=>{
+    if (est.codigoFamilia && est.codigoFamilia.trim()) return; // ya tiene familia asignada, no se toca
+    const fam = familiaByCodigo(est.codigo);
+    if (fam){ est.codigoFamilia = fam.codigo; vinculados++; }
+  });
+  return vinculados;
+}
 function periodosDisponibles(){
   return [...new Set(DB.cuentas.map(c=>c.periodo))].sort().reverse();
 }
@@ -818,6 +843,28 @@ function actividadesPendientesDeEstudiante(codigoEstudiante){
   const pend = DB.estudianteActividades.filter(ea=>ea.codigoEstudiante===codigoEstudiante && !ea.pagado);
   return { count: pend.length, total: pend.reduce((s,a)=>s+Number(a.costo||0),0), items: pend };
 }
+// Todos los estudiantes que pertenecen a una misma familia (por Codigo_Familia) — para cuando
+// una familia tiene más de un hijo y se necesita ver la deuda de todos juntos, no uno a la vez.
+function estudiantesDeFamilia(codigoFamilia){
+  const c = normCode(codigoFamilia);
+  return DB.estudiantes.filter(e=>normCode(e.codigoFamilia)===c);
+}
+// Balance pendiente total de una familia: suma el balance pendiente MÁS RECIENTE de cada
+// estudiante de esa familia (su último periodo reportado), más las actividades que deban.
+function balanceFamiliar(codigoFamilia){
+  const estudiantes = estudiantesDeFamilia(codigoFamilia);
+  let totalCuentas = 0, totalActividades = 0;
+  const detalle = estudiantes.map(est=>{
+    const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===est.codigo).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+    const ultima = cuentasEst[0] || null;
+    const pendienteEst = ultima ? balancePendiente(ultima) : 0;
+    const actPend = actividadesPendientesDeEstudiante(est.codigo);
+    totalCuentas += pendienteEst;
+    totalActividades += actPend.total;
+    return { estudiante: est, ultimaCuenta: ultima, pendiente: pendienteEst, actividadesPendientes: actPend };
+  });
+  return { estudiantes: detalle, totalCuentas, totalActividades, totalGeneral: totalCuentas + totalActividades };
+}
 
 /* =========================================================================
    RESPALDO / RESTAURACIÓN / LIMPIEZA DE DATOS DE MUESTRA
@@ -826,12 +873,21 @@ function hasDemoData(){
   return DB.familias.some(f=>f._demo) || DB.estudiantes.some(e=>e._demo) || DB.cuentas.some(c=>c._demo) || DB.seguimientos.some(s=>s._demo) || DB.abonos.some(a=>a._demo);
 }
 async function eliminarDatosDemo(){
+  const familiasBorradas = DB.familias.filter(f=>f._demo).map(f=>f.codigo);
+  const estudiantesBorrados = DB.estudiantes.filter(e=>e._demo).map(e=>e.codigo);
+  const cuentasBorradas = DB.cuentas.filter(c=>c._demo).map(c=>c.id);
+  const seguimientosBorrados = DB.seguimientos.filter(s=>s._demo).map(s=>s.id);
+  const abonosBorrados = DB.abonos.filter(a=>a._demo).map(a=>a.id);
   DB.familias = DB.familias.filter(f=>!f._demo);
   DB.estudiantes = DB.estudiantes.filter(e=>!e._demo);
   DB.cuentas = DB.cuentas.filter(c=>!c._demo);
   DB.seguimientos = DB.seguimientos.filter(s=>!s._demo);
   DB.abonos = DB.abonos.filter(a=>!a._demo);
-  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos();
+  // Importante: se pasan las claves eliminadas explícitamente. Sin esto, en modo compartido
+  // (Supabase/nube), la fusión segura no tenía forma de saber qué borrar y el "vaciado" no
+  // surtía efecto — solo evitaba agregar de más, pero no quitaba lo que ya estaba guardado.
+  await saveFamilias(familiasBorradas); await saveEstudiantes(estudiantesBorrados);
+  await saveCuentas(cuentasBorradas); await saveSeguimientos(seguimientosBorrados); await saveAbonos(abonosBorrados);
   registrarAuditoria('Datos de muestra eliminados', '');
 }
 // Vacía TODOS los datos de negocio (familias, estudiantes, cuentas, seguimientos, abonos,
@@ -847,8 +903,16 @@ async function vaciarTodosLosDatos(){
     `Para confirmar, escriba exactamente: VACIAR`
   );
   if (frase !== 'VACIAR'){ if (frase !== null) alert('No coincide con "VACIAR". No se hizo ningún cambio.'); return false; }
+  // Se capturan las claves ANTES de vaciar los arreglos, para poder decírselo explícitamente
+  // a la fusión segura (ver nota en eliminarDatosDemo — mismo motivo del bug).
+  const clavesFamilias = DB.familias.map(f=>f.codigo);
+  const clavesEstudiantes = DB.estudiantes.map(e=>e.codigo);
+  const clavesCuentas = DB.cuentas.map(c=>c.id);
+  const clavesSeguimientos = DB.seguimientos.map(s=>s.id);
+  const clavesAbonos = DB.abonos.map(a=>a.id);
   DB.familias = []; DB.estudiantes = []; DB.cuentas = []; DB.seguimientos = []; DB.abonos = []; DB.estudianteActividades = [];
-  await saveFamilias(); await saveEstudiantes(); await saveCuentas(); await saveSeguimientos(); await saveAbonos(); await saveActividades();
+  await saveFamilias(clavesFamilias); await saveEstudiantes(clavesEstudiantes); await saveCuentas(clavesCuentas);
+  await saveSeguimientos(clavesSeguimientos); await saveAbonos(clavesAbonos); await saveActividades();
   registrarAuditoria('Vaciado total de datos de negocio', `${conteo} registro(s) eliminados (familias, estudiantes, cuentas, seguimientos, abonos, actividades). Usuarios y catálogos conservados.`);
   return true;
 }
@@ -884,8 +948,18 @@ async function importBackupFile(file, onDone, onError){
     DB.abonos = d.abonos || [];
     DB.catalogos = d.catalogos || DB.catalogos;
     DB.auditoria = d.auditoria || DB.auditoria;
-    await saveFamilias(); await saveEstudiantes(); await saveActividades();
-    await saveCuentas(); await saveSeguimientos(); await saveUsuarios(); await saveAbonos(); await saveCatalogos();
+    // Restaurar un respaldo debe REEMPLAZAR todo por completo, no fusionarse con lo que ya
+    // estuviera guardado (por eso se usa dbSet directo y no las funciones save*/mergeYGuardar,
+    // que están pensadas para ediciones normales sin perder cambios ajenos, no para una restauración).
+    await dbSet('ccc:familias', DB.familias);
+    await dbSet('ccc:estudiantes', DB.estudiantes);
+    await dbSet('ccc:actividades', DB.actividades);
+    await dbSet('ccc:estudiante_actividades', DB.estudianteActividades);
+    await dbSet('ccc:cuentas', DB.cuentas);
+    await dbSet('ccc:seguimientos', DB.seguimientos);
+    await dbSet('ccc:usuarios', DB.usuarios);
+    await dbSet('ccc:abonos', DB.abonos);
+    await dbSet('ccc:catalogos', DB.catalogos);
     await dbSet('ccc:seeded', true);
     registrarAuditoria('Respaldo restaurado', file.name||'');
     if (onDone) onDone();
@@ -1027,7 +1101,7 @@ function renderReporte(root){
       <div class="field"><label>Responsable</label><select id="rResp"><option value="">Todos</option>${DB.catalogos.responsables.map(n=>`<option>${n}</option>`).join('')}</select></div>
       <div class="field"><label>Rango de mora</label><select id="rRango"><option value="">Todos</option><option value="3">3 meses</option><option value="4_5">4–5 meses</option><option value="6">6+ meses</option></select></div>
       <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:normal;padding:7px 0;"><input type="checkbox" id="rMostrarPagadas"> Mostrar cuentas ya saldadas/regularizadas</label></div>
-      <div class="field"><label>&nbsp;</label><button class="btn" id="rExport">⭳ Exportar CSV</button></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="rExport" title="Genera un Excel con el mismo formato que la plantilla de importación, listo para editar y volver a subir">⭳ Exportar (reimportable)</button></div>
       ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
     </div>
     <div class="tablewrap">
@@ -1067,13 +1141,18 @@ function renderReporte(root){
       const abonado = totalAbonadoCuenta(r.id);
       const pendiente = balancePendiente(r);
       const actPend = actividadesPendientesDeEstudiante(r.codigoEstudiante);
+      // Si el estudiante no está vinculado (código no coincide con ninguno del sistema), se
+      // muestra igual el nombre/familia que traía el archivo importado, en vez de dejarlo en blanco.
+      const nombreMostrar = r._est ? r._est.nombre : (r.nombreEstudianteImportado || '');
+      const familiaMostrar = fam ? fam.responsable : (r.nombreFamiliaImportado || r.codigoFamiliaImportado || '');
+      const sinVincular = !r._est;
       return `<tr>
         <td class="mono">${r.codigoEstudiante}</td>
-        <td>${r._est?r._est.nombre:'<span class="pill-error">No encontrado</span>'}</td>
+        <td>${nombreMostrar || '<span class="small">—</span>'}${sinVincular?` <span class="pill-warn" title="No se encontró un estudiante con este código en el sistema — verifique que el código coincida exactamente con el de Estudiantes/Familias">⚠ No vinculado</span>`:''}</td>
         <td>${r._est?r._est.nivel:''}</td>
         <td>${r._est?r._est.grado:''}</td>
         <td>${r._est?r._est.internado:''}</td>
-        <td>${fam?fam.responsable:''}</td>
+        <td>${familiaMostrar || ''}</td>
         <td class="mono">${fam?fam.tel1:''}</td>
         <td class="mono">${r.mesesAdeudados}</td>
         <td class="mono">${fmtMoney(r.balanceAnioAnterior)}</td>
@@ -1135,16 +1214,7 @@ function renderReporte(root){
     tbody.querySelectorAll('[data-abono]').forEach(btn=>{
       btn.onclick = ()=> openAbonoModal(btn.dataset.abono, draw);
     });
-    document.getElementById('rExport').onclick = ()=> exportCSV(rows.map(r=>({
-      Codigo:r.codigoEstudiante, Estudiante:r._est?r._est.nombre:'', Nivel:r._est?r._est.nivel:'', Grado:r._est?r._est.grado:'',
-      Internado:r._est?r._est.internado:'', Familia: (r._est?(familiaByCodigo(r._est.codigoFamilia)||{}).responsable:''),
-      Meses_Adeudados:r.mesesAdeudados, Balance_Anio_Anterior:r.balanceAnioAnterior, Balance_Meses_Actuales:r.balance,
-      Abonado:totalAbonadoCuenta(r.id), Balance_Pendiente:balancePendiente(r),
-      Actividades_Pendientes_Cantidad: actividadesPendientesDeEstudiante(r.codigoEstudiante).count,
-      Actividades_Pendientes_Monto: actividadesPendientesDeEstudiante(r.codigoEstudiante).total,
-      Estado:r.estado, Responsable:r.responsable,
-      Ultima_Gestion:r.fechaUltimaGestion, Proximo_Seguimiento:r.proximoSeguimiento, Observaciones:r.observaciones
-    })), `reporte_mensual_${p}.csv`);
+    document.getElementById('rExport').onclick = ()=> exportarReporteReimportable(rows, `reporte_mensual_${p}.xlsx`);
   };
   ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango','rMostrarPagadas'].forEach(id=> document.getElementById(id).onchange = draw);
   const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
@@ -1302,6 +1372,33 @@ function exportCSV(rows, filename){
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
 }
 
+// Exporta el Reporte Mensual (filtrado) con las MISMAS columnas que la plantilla de importación
+// (Codigo_Estudiante, Periodo_Reporte, Meses_Adeudados, etc.), en .xlsx, para poder editarlo en
+// Excel y volver a subirlo directamente desde "Importar Datos" sin tener que acomodar columnas.
+function exportarReporteReimportable(rows, filename){
+  if (!rows.length){ alert('No hay filas para exportar con estos filtros.'); return; }
+  const headers = ["Codigo_Estudiante*","Nombre_Estudiante","Codigo_Familia","Nombre_Familia","Nivel","Grado","Periodo_Reporte(AAAA-MM)*","Meses_Adeudados*","Balance_Anio_Anterior","Balance_Meses_Actuales*","Fecha_Ultimo_Pago","Monto_Ultimo_Pago","Estado_Gestion*","Responsable_Asignado*","Fecha_Ultima_Gestion","Proximo_Seguimiento","Observaciones"];
+  const datos = rows.map(r=>{
+    const est = r._est || estudianteByCodigo(r.codigoEstudiante);
+    const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
+    return [
+      r.codigoEstudiante,
+      est?est.nombre:(r.nombreEstudianteImportado||''),
+      est?est.codigoFamilia:(r.codigoFamiliaImportado||''),
+      fam?fam.responsable:(r.nombreFamiliaImportado||''),
+      est?est.nivel:'', est?est.grado:'',
+      r.periodo, r.mesesAdeudados, r.balanceAnioAnterior||0, r.balance,
+      r.fechaUltimoPago||'', r.montoUltimoPago||'', r.estado, r.responsable||'',
+      r.fechaUltimaGestion||'', r.proximoSeguimiento||'', r.observaciones||''
+    ];
+  });
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...datos]);
+  ws['!cols'] = headers.map(()=>({wch:20}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Reporte_Mensual");
+  XLSX.writeFile(wb, filename);
+}
+
 /* =========================================================================
    IMPORTAR DATOS
    ========================================================================= */
@@ -1329,8 +1426,8 @@ function downloadTemplate(kind){
     headers = ["Codigo_Estudiante*","Nombre_Completo*","Codigo_Familia*","Nivel_Academico*","Grado_Seccion*","Internado(Si/No)*","Internado_Fecha_Inicio","Internado_Fecha_Fin","Estado_Estudiante*"];
     example = ["EST-0003","Nombre Ejemplo","FAM-0003","Nivel Primario","1er Grado A","No","","","Activo"];
   } else {
-    headers = ["Codigo_Estudiante*","Periodo_Reporte(AAAA-MM)*","Meses_Adeudados*","Balance_Anio_Anterior","Balance_Meses_Actuales*","Fecha_Ultimo_Pago","Monto_Ultimo_Pago","Estado_Gestion*","Responsable_Asignado*","Fecha_Ultima_Gestion","Proximo_Seguimiento","Observaciones"];
-    example = ["EST-0001","2026-09",1,6000,8000,"","","Contactado","Ana Gómez","","",""];
+    headers = ["Codigo_Estudiante*","Nombre_Estudiante","Codigo_Familia","Nombre_Familia","Nivel","Grado","Periodo_Reporte(AAAA-MM)*","Meses_Adeudados*","Balance_Anio_Anterior","Balance_Meses_Actuales*","Fecha_Ultimo_Pago","Monto_Ultimo_Pago","Estado_Gestion*","Responsable_Asignado*","Fecha_Ultima_Gestion","Proximo_Seguimiento","Observaciones"];
+    example = ["EST-0001","Nombre Ejemplo","FAM-0003","Familia Ejemplo","Nivel Primario","1er Grado A","2026-09",1,6000,8000,"","","Contactado","Ana Gómez","","",""];
   }
   const ws = XLSX.utils.aoa_to_sheet([headers, example]);
   ws['!cols'] = headers.map(()=>({wch:20}));
@@ -1450,8 +1547,10 @@ function previewFamilias(rows){
       if (idx>=0){ DB.familias[idx] = obj; actualizados++; } else { DB.familias.push(obj); creados++; }
     });
     await saveFamilias();
-    registrarAuditoria('Importación de familias', `${creados} creada(s), ${actualizados} actualizada(s)`);
-    box.innerHTML = `<div class="note">Importación completada: ${creados} familia(s) creada(s), ${actualizados} actualizada(s).</div>`;
+    const vinculados = vincularEstudiantesPorCodigoCoincidente();
+    if (vinculados) await saveEstudiantes();
+    registrarAuditoria('Importación de familias', `${creados} creada(s), ${actualizados} actualizada(s)${vinculados?`, ${vinculados} estudiante(s) vinculado(s) automáticamente por código coincidente`:''}`);
+    box.innerHTML = `<div class="note">Importación completada: ${creados} familia(s) creada(s), ${actualizados} actualizada(s)${vinculados?`. ${vinculados} estudiante(s) se vincularon automáticamente a la familia con su mismo código.`:'.'}</div>`;
   };
 }
 function previewEstudiantes(rows){
@@ -1500,8 +1599,10 @@ function previewEstudiantes(rows){
       if (idx>=0){ DB.estudiantes[idx]=obj; actualizados++; } else { DB.estudiantes.push(obj); creados++; }
     });
     await saveEstudiantes();
-    registrarAuditoria('Importación de estudiantes', `${creados} creado(s), ${actualizados} actualizado(s)`);
-    box.innerHTML = `<div class="note">Importación completada: ${creados} estudiante(s) creado(s), ${actualizados} actualizado(s).</div>`;
+    const vinculados = vincularEstudiantesPorCodigoCoincidente();
+    if (vinculados) await saveEstudiantes();
+    registrarAuditoria('Importación de estudiantes', `${creados} creado(s), ${actualizados} actualizado(s)${vinculados?`, ${vinculados} vinculado(s) automáticamente por código coincidente`:''}`);
+    box.innerHTML = `<div class="note">Importación completada: ${creados} estudiante(s) creado(s), ${actualizados} actualizado(s)${vinculados?`. ${vinculados} se vincularon automáticamente a la familia con su mismo código.`:'.'}</div>`;
   };
 }
 
@@ -1543,23 +1644,36 @@ function previewReporte(rows){
     if (r.Periodo_Reporte && esMesFueraDeCiclo(r.Periodo_Reporte)) warns.push('Mes fuera del ciclo Sept–Jul');
     const existe = !!estudianteByCodigo(r.Codigo_Estudiante);
     if (!existe && !crearFaltantes) warns.push('Estudiante no existe en el sistema');
-    return {r, errs, warns, existe};
+    let familiaExiste = null, familiaCambia = false;
+    if (r.Codigo_Familia){
+      familiaExiste = !!familiaByCodigo(r.Codigo_Familia);
+      if (!familiaExiste) warns.push(`Familia ${r.Codigo_Familia} no existe — no se vinculará`);
+      else {
+        const est = estudianteByCodigo(r.Codigo_Estudiante);
+        if (est && normCode(est.codigoFamilia) !== normCode(r.Codigo_Familia)) familiaCambia = true;
+      }
+    }
+    return {r, errs, warns, existe, familiaExiste, familiaCambia};
   });
   const box = document.getElementById('previewRep');
   function draw(){
     const analyzed = analyze();
     const hardErrors = analyzed.filter(a=>a.errs.length>0).length;
     const faltantes = analyzed.filter(a=>!a.existe).length;
+    const cambiosFamilia = analyzed.filter(a=>a.familiaCambia).length;
     box.innerHTML = `
       <div class="card">
         <h2>Vista previa — Reporte Mensual <span class="n">${rows.length} filas</span></h2>
         ${hardErrors>0?`<div class="alertbox">${hardErrors} fila(s) con errores de formato — no se importarán.</div>`:''}
         ${faltantes>0?`<div class="note">${faltantes} fila(s) referencian estudiantes que no existen todavía en el sistema.
           <label style="margin-left:10px;"><input type="checkbox" id="chkCrear" ${crearFaltantes?'checked':''}> Crear automáticamente estos estudiantes (con datos mínimos, editables luego en "Estudiantes/Familias")</label></div>`:''}
+        ${cambiosFamilia>0?`<div class="note">${cambiosFamilia} fila(s) vincularán automáticamente al estudiante con la familia indicada en "Codigo_Familia" (ya existe en el sistema, coincide por código).</div>`:''}
         <div class="tablewrap" style="max-height:320px;">
-          <table><thead><tr><th>Código Est.</th><th>Periodo</th><th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Estado</th><th>Responsable</th><th>Validación</th></tr></thead>
+          <table><thead><tr><th>Código Est.</th><th>Estudiante</th><th>Familia</th><th>Periodo</th><th>Meses</th><th>Bal. año ant.</th><th>Bal. meses act.</th><th>Estado</th><th>Responsable</th><th>Validación</th></tr></thead>
           <tbody>${analyzed.map(a=>`<tr>
-            <td class="mono">${a.r.Codigo_Estudiante||''}</td><td class="mono">${a.r.Periodo_Reporte||''}</td><td class="mono">${a.r.Meses_Adeudados??''}</td>
+            <td class="mono">${a.r.Codigo_Estudiante||''}</td><td>${a.r.Nombre_Estudiante||''}</td>
+            <td class="mono">${a.r.Codigo_Familia||''}${a.r.Nombre_Familia?` <span class="small">(${a.r.Nombre_Familia})</span>`:''}</td>
+            <td class="mono">${a.r.Periodo_Reporte||''}</td><td class="mono">${a.r.Meses_Adeudados??''}</td>
             <td class="mono">${a.r.Balance_Anio_Anterior||0}</td><td class="mono">${a.r.Balance_Meses_Actuales??''}</td>
             <td>${a.r.Estado_Gestion||''}</td><td>${a.r.Responsable_Asignado||''}</td>
             <td>${a.errs.length? `<span class="pill-error">${a.errs.join('; ')}</span>` : (a.warns.length? `<span class="pill-warn">${a.warns.join('; ')}</span>` : `<span class="pill-ok">OK</span>`)}</td>
@@ -1577,25 +1691,55 @@ function previewReporte(rows){
       const fileInput = document.getElementById('fileRep'); if (fileInput) fileInput.value = '';
     };
     document.getElementById('confirmRep').onclick = async ()=>{
-      let importadas = 0, estCreados = 0;
+      let importadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
+      let estudiantesModificados = false, catalogosModificados = false;
       analyzed.filter(a=>a.errs.length===0).forEach(a=>{
         const r = a.r;
         if (!a.existe){
-          if (!crearFaltantes) return;
-          DB.estudiantes.push({codigo:r.Codigo_Estudiante, nombre:'(Pendiente de completar)', codigoFamilia:'', nivel:'', grado:'', internado:'No', internadoInicio:'', internadoFin:'', estado:'Activo'});
-          estCreados++;
+          if (crearFaltantes){
+            // Si el archivo trae Codigo_Familia y esa familia ya existe, el estudiante nuevo
+            // se crea ya vinculado a ella automáticamente — sin necesidad de un paso aparte.
+            const familiaInicial = (r.Codigo_Familia && a.familiaExiste) ? normCode(r.Codigo_Familia) : '';
+            DB.estudiantes.push({codigo:r.Codigo_Estudiante, nombre:r.Nombre_Estudiante||'(Pendiente de completar)', codigoFamilia:familiaInicial, nivel:r.Nivel||'', grado:r.Grado||'', internado:'No', internadoInicio:'', internadoFin:'', estado:'Activo'});
+            estCreados++;
+            estudiantesModificados = true;
+            if (familiaInicial) familiasVinculadas++;
+          } else {
+            // No se creó el estudiante formalmente, pero el registro de deuda SÍ se importa —
+            // se muestra con los datos que traía el archivo, marcado como "no vinculado", para
+            // que Dirección no pierda de vista quién debe aunque falte completar su ficha.
+            sinVincular++;
+          }
+        } else if (a.familiaCambia && a.familiaExiste){
+          // Estudiante ya existente: si el código de familia del archivo coincide con una familia
+          // real y es distinto al que tenía, se actualiza el vínculo automáticamente.
+          const est = estudianteByCodigo(r.Codigo_Estudiante);
+          est.codigoFamilia = normCode(r.Codigo_Familia);
+          estudiantesModificados = true;
+          familiasVinculadas++;
+        }
+        // Si el responsable indicado en el archivo no está todavía en el catálogo, se agrega solo
+        // — así aparece disponible de inmediato en el desplegable de "Responsable" del Reporte Mensual.
+        if (r.Responsable_Asignado && !DB.catalogos.responsables.includes(r.Responsable_Asignado)){
+          DB.catalogos.responsables.push(r.Responsable_Asignado);
+          catalogosModificados = true;
+          responsablesNuevos++;
         }
         DB.cuentas.push({
           id: cuid(), codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
           balanceAnioAnterior:Number(r.Balance_Anio_Anterior||0), balance:Number(r.Balance_Meses_Actuales), fechaUltimoPago:r.Fecha_Ultimo_Pago||'', montoUltimoPago:r.Monto_Ultimo_Pago||'',
           estado:r.Estado_Gestion, responsable:r.Responsable_Asignado, fechaUltimaGestion:r.Fecha_Ultima_Gestion||'',
-          proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||''
+          proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||'',
+          // Respaldo: si por algún motivo el estudiante no llega a vincularse (código distinto,
+          // no encontrado, etc.), el Reporte Mensual igual muestra estos datos en vez de dejarlos vacíos.
+          nombreEstudianteImportado: r.Nombre_Estudiante||'', nombreFamiliaImportado: r.Nombre_Familia||'', codigoFamiliaImportado: r.Codigo_Familia||''
         });
         importadas++;
       });
-      await saveCuentas(); if (estCreados) await saveEstudiantes();
-      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s) automáticamente`);
-      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente (complete sus datos en la ficha)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>`;
+      await saveCuentas(); if (estudiantesModificados) await saveEstudiantes(); if (catalogosModificados) await saveCatalogos();
+      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
+      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
+      ${sinVincular?`<div class="alertbox">${sinVincular} registro(s) se importaron con el nombre/familia del archivo, pero <b>no se pudieron vincular a un estudiante existente</b> (el "Codigo_Estudiante" del archivo no coincide con ninguno del sistema). Búsquelos en el Reporte Mensual con la etiqueta "⚠ No vinculado" — revise que el código coincida exactamente con el de "Estudiantes/Familias", o marque "Crear automáticamente" la próxima vez.</div>`:''}`;
     };
   }
   draw();
@@ -1608,25 +1752,84 @@ function renderFichas(root){
   const canEdit = perm('editarFicha');
   root.innerHTML = `
     <div class="toolbar">
-      <div class="searchbar"><input id="fichaSearch" placeholder="Buscar por nombre de estudiante, código o familia…"></div>
+      <div class="searchbar"><input id="fichaSearch" placeholder="Buscar por código de familia, responsable, o nombre/código de estudiante…"></div>
       ${canEdit?`<div class="field"><label>&nbsp;</label><button class="btn" id="fNuevaFamilia">+ Nueva familia</button></div>
       <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="fNuevoEstudiante">+ Nuevo estudiante</button></div>`:''}
     </div>
     <div class="grid grid-2" style="align-items:start;">
-      <div class="card"><h2>Estudiantes <span class="n" id="fichaCount"></span></h2><div class="tablewrap" style="max-height:560px;"><table><thead><tr><th>Código</th><th>Nombre</th><th>Nivel</th><th>Familia</th></tr></thead><tbody id="fichaList"></tbody></table></div></div>
-      <div id="fichaDetail" class="card"><div class="empty">Seleccione un estudiante para ver su ficha completa.</div></div>
+      <div class="card"><h2>Familias <span class="n" id="fichaCount"></span></h2>
+        <p class="small" style="margin-top:-6px;margin-bottom:10px;">Haga clic en una familia para ver a sus estudiantes.</p>
+        <div class="tablewrap" style="max-height:560px;"><table><thead><tr><th>Código</th><th>Familia / Estudiante</th><th>Nivel / Cant.</th><th>Teléfono</th></tr></thead><tbody id="fichaList"></tbody></table></div>
+      </div>
+      <div id="fichaDetail" class="card"><div class="empty">Seleccione una familia y luego un estudiante para ver su ficha completa.</div></div>
     </div>
   `;
   const search = document.getElementById('fichaSearch');
+  const expandedFamilias = new Set();
   const drawList = ()=>{
     const q = (search.value||'').toLowerCase();
-    let list = DB.estudiantes.filter(e=>{
-      const fam = familiaByCodigo(e.codigoFamilia);
-      return e.nombre.toLowerCase().includes(q) || e.codigo.toLowerCase().includes(q) || (fam&&fam.responsable.toLowerCase().includes(q));
+    const grupos = DB.familias.map(fam=>({
+      fam, hijos: DB.estudiantes.filter(e=> normCode(e.codigoFamilia)===normCode(fam.codigo))
+    }));
+    const sinFamilia = DB.estudiantes.filter(e=> !e.codigoFamilia || !familiaByCodigo(e.codigoFamilia));
+
+    const coincideHijo = (h)=> h.nombre.toLowerCase().includes(q) || h.codigo.toLowerCase().includes(q);
+    const gruposFiltrados = grupos.filter(({fam, hijos})=>{
+      if (!q) return true;
+      return fam.codigo.toLowerCase().includes(q) || fam.responsable.toLowerCase().includes(q) || hijos.some(coincideHijo);
     });
-    document.getElementById('fichaCount').textContent = list.length;
-    document.getElementById('fichaList').innerHTML = list.map(e=>`<tr class="linklike-row" data-c="${e.codigo}"><td class="mono">${e.codigo}</td><td>${e.nombre}</td><td>${e.nivel}</td><td>${(familiaByCodigo(e.codigoFamilia)||{}).responsable||''}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Sin resultados</td></tr>`;
-    document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.style.cursor='pointer');
+    const sinFamiliaFiltrada = sinFamilia.filter(h=> !q || coincideHijo(h));
+
+    document.getElementById('fichaCount').textContent = `${gruposFiltrados.length} familias · ${DB.estudiantes.length} estudiantes`;
+
+    let html = '';
+    gruposFiltrados.forEach(({fam, hijos})=>{
+      const autoExpandir = !!q && hijos.some(coincideHijo) && !fam.codigo.toLowerCase().includes(q) && !fam.responsable.toLowerCase().includes(q);
+      const expandido = expandedFamilias.has(fam.codigo) || autoExpandir;
+      html += `<tr class="linklike-row" data-famtoggle="${fam.codigo}" style="cursor:pointer;background:var(--paper);">
+        <td class="mono" style="font-weight:700;">${expandido?'▾':'▸'} ${fam.codigo}</td>
+        <td style="font-weight:700;">${fam.responsable}</td>
+        <td>${hijos.length} estudiante${hijos.length!==1?'s':''}</td>
+        <td class="mono small">${fam.tel1||''}</td>
+      </tr>`;
+      if (expandido){
+        if (!hijos.length){
+          html += `<tr><td></td><td colspan="3" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td></tr>`;
+        }
+        hijos.forEach(h=>{
+          html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
+            <td class="mono small" style="padding-left:26px;">${h.codigo}</td>
+            <td>${h.nombre}</td>
+            <td class="small">${h.nivel||''} ${h.grado||''}</td>
+            <td></td>
+          </tr>`;
+        });
+      }
+    });
+    if (sinFamiliaFiltrada.length){
+      const expandidoSin = expandedFamilias.has('__sin_familia__');
+      html += `<tr class="linklike-row" data-famtoggle="__sin_familia__" style="cursor:pointer;background:var(--paper);">
+        <td class="mono" style="font-weight:700;">${expandidoSin?'▾':'▸'} —</td>
+        <td style="font-weight:700;color:var(--rojo);">Sin familia asignada</td>
+        <td>${sinFamiliaFiltrada.length} estudiante${sinFamiliaFiltrada.length!==1?'s':''}</td><td></td>
+      </tr>`;
+      if (expandidoSin){
+        sinFamiliaFiltrada.forEach(h=>{
+          html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
+            <td class="mono small" style="padding-left:26px;">${h.codigo}</td><td>${h.nombre}</td><td class="small">${h.nivel||''} ${h.grado||''}</td><td></td>
+          </tr>`;
+        });
+      }
+    }
+    document.getElementById('fichaList').innerHTML = html || `<tr><td colspan="4" class="empty">Sin resultados</td></tr>`;
+
+    document.querySelectorAll('[data-famtoggle]').forEach(tr=>{
+      tr.onclick = ()=>{
+        const key = tr.dataset.famtoggle;
+        if (expandedFamilias.has(key)) expandedFamilias.delete(key); else expandedFamilias.add(key);
+        drawList();
+      };
+    });
     document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.onclick = ()=> drawDetail(tr.dataset.c));
   };
   function drawDetail(codigo){
@@ -1650,6 +1853,31 @@ function renderFichas(root){
         <div><span class="small">Teléfono</span><div class="mono">${fam?fam.tel1:'—'}</div></div>
       </div>
       ${!editable?'<p class="small" style="margin-top:8px;">Modo solo lectura para su rol.</p>':''}
+      <hr class="sep">
+      <h2>Balance familiar ${fam?`<span class="small">— ${fam.responsable} (${fam.codigo})</span>`:''}</h2>
+      ${(()=>{
+        if (!fam) return '<p class="small">Este estudiante no tiene familia asignada todavía.</p>';
+        const bf = balanceFamiliar(fam.codigo);
+        const otros = bf.estudiantes.length > 1;
+        return `
+          <div class="grid grid-3">
+            <div class="stat"><div class="label">Estudiantes en esta familia</div><div class="value">${bf.estudiantes.length}</div></div>
+            <div class="stat"><div class="label">Balance de colegiatura (todos)</div><div class="value">${fmtMoney(bf.totalCuentas)}</div></div>
+            <div class="stat"><div class="label">Balance total familiar</div><div class="value" style="color:var(--rojo)">${fmtMoney(bf.totalGeneral)}</div><div class="sub">Incluye actividades pendientes</div></div>
+          </div>
+          ${otros ? `
+          <div class="tablewrap" style="max-height:220px;margin-top:12px;">
+            <table><thead><tr><th>Estudiante</th><th>Nivel/Grado</th><th>Último periodo</th><th>Bal. colegiatura</th><th>Activ. pend.</th></tr></thead>
+            <tbody>${bf.estudiantes.map(d=>`<tr ${d.estudiante.codigo===codigo?'style="background:var(--accent-light);"':''}>
+              <td>${d.estudiante.nombre} ${d.estudiante.codigo===codigo?'<span class="small">(este)</span>':''}</td>
+              <td class="small">${d.estudiante.nivel||''} ${d.estudiante.grado||''}</td>
+              <td class="mono">${d.ultimaCuenta?d.ultimaCuenta.periodo:'—'}</td>
+              <td class="mono" style="font-weight:700;">${fmtMoney(d.pendiente)}</td>
+              <td class="mono">${d.actividadesPendientes.count>0?fmtMoney(d.actividadesPendientes.total):'—'}</td>
+            </tr>`).join('')}</tbody></table>
+          </div>` : `<p class="small" style="margin-top:8px;">Esta familia solo tiene un estudiante registrado.</p>`}
+        `;
+      })()}
       <hr class="sep">
       <h2>Actividades</h2>
       <div class="tablewrap" style="max-height:240px;">

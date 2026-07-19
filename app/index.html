@@ -1691,7 +1691,7 @@ function previewReporte(rows){
       const fileInput = document.getElementById('fileRep'); if (fileInput) fileInput.value = '';
     };
     document.getElementById('confirmRep').onclick = async ()=>{
-      let importadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
+      let importadas = 0, actualizadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
       let estudiantesModificados = false, catalogosModificados = false;
       analyzed.filter(a=>a.errs.length===0).forEach(a=>{
         const r = a.r;
@@ -1725,20 +1725,30 @@ function previewReporte(rows){
           catalogosModificados = true;
           responsablesNuevos++;
         }
-        DB.cuentas.push({
-          id: cuid(), codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
+        // Si ya existe un registro de cuenta crítica para este MISMO estudiante y este MISMO
+        // periodo, se actualiza en su lugar — nunca se duplica. El "id" se conserva para no
+        // desvincular los abonos que ya se hubieran registrado contra ese registro.
+        const cuentaExistenteIdx = DB.cuentas.findIndex(c=> normCode(c.codigoEstudiante)===normCode(r.Codigo_Estudiante) && c.periodo===r.Periodo_Reporte);
+        const datosCuenta = {
+          codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
           balanceAnioAnterior:Number(r.Balance_Anio_Anterior||0), balance:Number(r.Balance_Meses_Actuales), fechaUltimoPago:r.Fecha_Ultimo_Pago||'', montoUltimoPago:r.Monto_Ultimo_Pago||'',
           estado:r.Estado_Gestion, responsable:r.Responsable_Asignado, fechaUltimaGestion:r.Fecha_Ultima_Gestion||'',
           proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||'',
           // Respaldo: si por algún motivo el estudiante no llega a vincularse (código distinto,
           // no encontrado, etc.), el Reporte Mensual igual muestra estos datos en vez de dejarlos vacíos.
           nombreEstudianteImportado: r.Nombre_Estudiante||'', nombreFamiliaImportado: r.Nombre_Familia||'', codigoFamiliaImportado: r.Codigo_Familia||''
-        });
-        importadas++;
+        };
+        if (cuentaExistenteIdx >= 0){
+          DB.cuentas[cuentaExistenteIdx] = { ...DB.cuentas[cuentaExistenteIdx], ...datosCuenta, id: DB.cuentas[cuentaExistenteIdx].id };
+          actualizadas++;
+        } else {
+          DB.cuentas.push({ id: cuid(), ...datosCuenta });
+          importadas++;
+        }
       });
       await saveCuentas(); if (estudiantesModificados) await saveEstudiantes(); if (catalogosModificados) await saveCatalogos();
-      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
-      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
+      registrarAuditoria('Importación de reporte mensual', `${importadas} creado(s), ${actualizadas} actualizado(s) (sin duplicar), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
+      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) nuevo(s)${actualizadas?`, ${actualizadas} registro(s) ya existentes actualizados (no se duplicaron)`:''}${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
       ${sinVincular?`<div class="alertbox">${sinVincular} registro(s) se importaron con el nombre/familia del archivo, pero <b>no se pudieron vincular a un estudiante existente</b> (el "Codigo_Estudiante" del archivo no coincide con ninguno del sistema). Búsquelos en el Reporte Mensual con la etiqueta "⚠ No vinculado" — revise que el código coincida exactamente con el de "Estudiantes/Familias", o marque "Crear automáticamente" la próxima vez.</div>`:''}`;
     };
   }

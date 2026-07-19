@@ -14,21 +14,18 @@ Sistema web para dar seguimiento a cuentas críticas por cobrar, con login, role
 ## ⚠️ No le des doble clic a app/index.html
 Ábrelo publicado con GitHub Pages o dentro de Claude.ai.
 
-## Novedad: el Reporte Mensual ya no deja campos en blanco
+## Arreglo importante: reimportar el Reporte Mensual ya no duplica
 
-**Problema resuelto**: al importar el Reporte Mensual, si el "Codigo_Estudiante" del archivo no coincidía con ningún estudiante ya registrado (por diferencias de código, o porque aún no se había importado ese estudiante), el registro de deuda se perdía por completo o se mostraba sin nombre ni familia.
+**El bug**: cada vez que se importaba el Reporte Mensual, el sistema siempre creaba un registro nuevo — sin revisar si ya existía uno para ese mismo estudiante y ese mismo periodo. Al subir el mismo archivo dos veces (por ejemplo, con montos corregidos), terminabas con dos filas para la misma familia en el mismo mes, duplicando los totales.
 
-**Ahora:**
-- El registro **siempre se importa**, aunque el estudiante no esté formalmente vinculado — se muestra con el nombre y familia que traía el archivo, y una etiqueta clara **"⚠ No vinculado"** para que sepas exactamente cuáles hay que revisar.
-- Si marcas "Crear automáticamente estudiantes faltantes", se crean y vinculan de una vez, usando los datos del archivo.
-- Los **responsables** que traiga el archivo y todavía no existan en el catálogo se agregan solos — ya aparecen disponibles en el desplegable de "Responsable" sin tener que crearlos a mano en Catálogos.
+**Ahora**: si ya existe un registro para ese estudiante y periodo, se **actualiza** con los nuevos datos del archivo — nunca se duplica. Además, el `id` interno del registro se conserva, así que **los abonos que ya hubieras registrado contra esa cuenta no se pierden** al reimportar.
 
-Se probó exactamente el escenario que reportaron: un código de estudiante que no existe en el sistema, con la casilla de creación automática desmarcada — el registro se importa igual, con el nombre y la familia visibles, marcado como no vinculado, y el responsable nuevo del archivo aparece de inmediato en el desplegable.
+Se probó exactamente el escenario reportado: importar el mismo periodo dos veces con datos distintos (resultado: 1 sola fila, con el balance actualizado), y reimportar después de haber registrado un abono (resultado: el abono se mantiene aplicado correctamente al nuevo balance).
 
 ## Arreglos anteriores incluidos
-- Vista de familias con acordeón (en vez de matrícula de estudiante como código principal).
-- Balance familiar agregado (suma de todos los hijos de una familia).
-- Vinculación automática por código coincidente (y auto-reparación de datos antiguos).
+- El Reporte Mensual siempre muestra nombre/familia, aunque el estudiante no esté formalmente vinculado ("⚠ No vinculado").
+- Los responsables que traiga el archivo se agregan solos al catálogo.
+- Vista de familias con acordeón, balance familiar agregado, vinculación automática por código.
 - Vaciado de datos y eliminar datos de muestra funcionan de verdad en modo compartido (Supabase).
 
 ## Publicar con GitHub Pages

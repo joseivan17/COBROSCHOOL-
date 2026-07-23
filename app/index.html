@@ -1365,6 +1365,89 @@ function openGestionModal(cuentaId, onDone, codigoEstudianteFallback){
 }
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
+// Editar una gestión ya registrada. Disponible para Administrador y Contable (mismo permiso
+// que editar fichas); eliminar queda reservado a Administrador — se revisa en cada punto de uso.
+function openEditarGestionModal(seguimientoId, onDone){
+  const seg = DB.seguimientos.find(s=>s.id===seguimientoId);
+  if (!seg) return;
+  const est = estudianteByCodigo(seg.codigoEstudiante);
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>Editar gestión</h3>
+      <p class="small">${est?est.nombre:seg.codigoEstudiante} · ${seg.codigoEstudiante}</p>
+      <div class="formgrid">
+        <div><label>Fecha</label><input type="date" id="gFecha" value="${seg.fecha}"></div>
+        <div><label>Responsable</label><select id="gResp">${DB.catalogos.responsables.map(r=>`<option ${r===seg.responsable?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Medio de contacto</label><select id="gMedio">${DB.catalogos.mediosContacto.map(m=>`<option ${m===seg.medio?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div><label>Resultado</label><select id="gResultado">${DB.catalogos.resultadosGestion.map(r=>`<option ${r===seg.resultado?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Próxima gestión</label><input type="date" id="gProxima" value="${seg.proximaGestion||''}"></div>
+        <div class="full"><label>Observaciones</label><textarea id="gObs">${seg.observaciones||''}</textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="gCancel">Cancelar</button>
+        <button class="btn btn-primary" id="gGuardar">Guardar cambios</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('gCancel').onclick = closeModal;
+  document.getElementById('gGuardar').onclick = async ()=>{
+    seg.fecha = document.getElementById('gFecha').value;
+    seg.responsable = document.getElementById('gResp').value;
+    seg.medio = document.getElementById('gMedio').value;
+    seg.resultado = document.getElementById('gResultado').value;
+    seg.proximaGestion = document.getElementById('gProxima').value;
+    seg.observaciones = document.getElementById('gObs').value;
+    await saveSeguimientos();
+    registrarAuditoria('Gestión editada', `${seg.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
+    closeModal(); if (onDone) onDone();
+  };
+}
+// Eliminar una gestión. Se revisa el permiso aquí también, no solo al ocultar el botón —
+// misma defensa en dos capas que se usa para cuentas críticas y actividades.
+async function eliminarGestion(seguimientoId, onDone){
+  if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+  const seg = DB.seguimientos.find(s=>s.id===seguimientoId);
+  if (!seg) return;
+  if (!confirm(`¿Eliminar esta gestión del ${seg.fecha} (${seg.medio} · ${seg.resultado})? Esta acción no se puede deshacer.`)) return;
+  DB.seguimientos = DB.seguimientos.filter(s=>s.id!==seguimientoId);
+  await saveSeguimientos([seguimientoId]);
+  registrarAuditoria('Gestión eliminada', `${seg.codigoEstudiante} · ${seg.fecha} · ${seg.medio} · ${seg.resultado}`);
+  if (onDone) onDone();
+}
+// Elimina un estudiante por completo, junto con todo lo que dependa de él (cuentas críticas,
+// abonos de esas cuentas, seguimientos, e inscripciones a actividades) — para no dejar registros
+// huérfanos apuntando a un código de estudiante que ya no existe. Solo Administrador.
+async function eliminarEstudianteCompleto(codigoEstudiante, onDone){
+  if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+  const est = estudianteByCodigo(codigoEstudiante);
+  if (!est) return;
+  const cuentasDelEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante);
+  const cuentaIds = cuentasDelEst.map(c=>c.id);
+  const abonosDelEst = DB.abonos.filter(a=>a.codigoEstudiante===codigoEstudiante);
+  const seguimientosDelEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante);
+  const actividadesDelEst = DB.estudianteActividades.filter(a=>a.codigoEstudiante===codigoEstudiante);
+  const resumen = `Esto eliminará PERMANENTEMENTE a "${est.nombre}" (${codigoEstudiante}) y todo lo asociado a este estudiante:\n` +
+    `• ${cuentasDelEst.length} registro(s) de cuentas críticas\n• ${abonosDelEst.length} abono(s)\n` +
+    `• ${seguimientosDelEst.length} gestión(es) de seguimiento\n• ${actividadesDelEst.length} inscripción(es) a actividades\n\n` +
+    `Esta acción no se puede deshacer. ¿Continuar?`;
+  if (!confirm(resumen)) return;
+  DB.cuentas = DB.cuentas.filter(c=>c.codigoEstudiante!==codigoEstudiante);
+  DB.abonos = DB.abonos.filter(a=>a.codigoEstudiante!==codigoEstudiante);
+  DB.seguimientos = DB.seguimientos.filter(s=>s.codigoEstudiante!==codigoEstudiante);
+  DB.estudianteActividades = DB.estudianteActividades.filter(a=>a.codigoEstudiante!==codigoEstudiante);
+  DB.estudiantes = DB.estudiantes.filter(e=>e.codigo!==codigoEstudiante);
+  await saveCuentas(cuentaIds);
+  await saveAbonos(abonosDelEst.map(a=>a.id));
+  await saveSeguimientos(seguimientosDelEst.map(s=>s.id));
+  await saveActividades(); // estudianteActividades se guarda con dbSet directo, no necesita deletedKeys
+  await saveEstudiantes([codigoEstudiante]);
+  registrarAuditoria('Estudiante eliminado', `${codigoEstudiante} · ${est.nombre} (junto con ${cuentasDelEst.length} cuenta(s), ${abonosDelEst.length} abono(s), ${seguimientosDelEst.length} gestión(es), ${actividadesDelEst.length} actividad(es))`);
+  if (onDone) onDone();
+}
+
 function exportCSV(rows, filename){
   if (!rows.length){ alert('No hay filas para exportar.'); return; }
   const headers = Object.keys(rows[0]);
@@ -1805,7 +1888,8 @@ function renderFichas(root){
       </tr>`;
       if (expandido){
         if (!hijos.length){
-          html += `<tr><td></td><td colspan="3" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td></tr>`;
+          html += `<tr><td></td><td colspan="2" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td>
+            <td>${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delfam="${fam.codigo}">Eliminar familia</button>`:''}</td></tr>`;
         }
         hijos.forEach(h=>{
           html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
@@ -1842,6 +1926,21 @@ function renderFichas(root){
       };
     });
     document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.onclick = ()=> drawDetail(tr.dataset.c));
+    document.querySelectorAll('[data-delfam]').forEach(btn=>{
+      btn.onclick = async (e)=>{
+        e.stopPropagation();
+        if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+        const codigo = btn.dataset.delfam;
+        const familia = familiaByCodigo(codigo);
+        if (!familia) return;
+        if (estudiantesDeFamilia(codigo).length){ alert('Esta familia todavía tiene estudiantes vinculados — no se puede eliminar hasta reasignarlos o eliminarlos primero.'); return; }
+        if (!confirm(`¿Eliminar la familia "${familia.responsable}" (${codigo})? Esta acción no se puede deshacer.`)) return;
+        DB.familias = DB.familias.filter(f=>f.codigo!==codigo);
+        await saveFamilias([codigo]);
+        registrarAuditoria('Familia eliminada', `${codigo} · ${familia.responsable}`);
+        drawList();
+      };
+    });
   };
   function drawDetail(codigo){
     const est = estudianteByCodigo(codigo); const fam = familiaByCodigo(est.codigoFamilia);
@@ -1853,7 +1952,11 @@ function renderFichas(root){
     document.getElementById('fichaDetail').innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:start;">
         <h2>${est.nombre} <span class="n mono">${est.codigo}</span></h2>
-        ${editable?`<div style="display:flex;gap:6px;"><button class="btn btn-sm" id="editEstBtn">Editar estudiante</button>${fam?`<button class="btn btn-sm" id="editFamBtn">Editar familia</button>`:''}</div>`:''}
+        ${editable?`<div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" id="editEstBtn">Editar estudiante</button>
+          ${fam?`<button class="btn btn-sm" id="editFamBtn">Editar familia</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" id="delEstBtn">Eliminar estudiante</button>`:''}
+        </div>`:''}
       </div>
       <div class="grid grid-2">
         <div><span class="small">Nivel</span><div>${est.nivel||'—'}</div></div>
@@ -1926,13 +2029,20 @@ function renderFichas(root){
         <h2>Historial de seguimientos</h2>
         ${editable ? `<button class="btn btn-sm btn-primary" id="fichaAddGestion">+ Registrar gestión</button>` : ''}
       </div>
-      <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span></div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
+      <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span>
+        ${editable?`<div style="margin-top:6px;"><button class="btn btn-sm" data-editgestficha="${s.id}">✏ Editar</button> ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delgestficha="${s.id}">✕ Eliminar</button>`:''}</div>`:''}
+      </div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
     `;
     if (editable){
       const editEstBtn = document.getElementById('editEstBtn');
       if (editEstBtn) editEstBtn.onclick = ()=> openEstudianteModal(est.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
       const editFamBtn = document.getElementById('editFamBtn');
       if (editFamBtn) editFamBtn.onclick = ()=> openFamiliaModal(fam.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
+      const delEstBtn = document.getElementById('delEstBtn');
+      if (delEstBtn) delEstBtn.onclick = ()=> eliminarEstudianteCompleto(est.codigo, ()=>{
+        drawList();
+        document.getElementById('fichaDetail').innerHTML = '<div class="empty">Estudiante eliminado. Seleccione otra familia o estudiante.</div>';
+      });
       const actAdd = document.getElementById('actAdd');
       if (actAdd) actAdd.onclick = async ()=>{
         const periodoVal = document.getElementById('actPeriodo').value.trim();
@@ -1993,6 +2103,12 @@ function renderFichas(root){
       if (addAbonoBtn) addAbonoBtn.onclick = ()=> openAbonoModal(cuentasEst[0].id, ()=> drawDetail(est.codigo));
       const addGestionBtn = document.getElementById('fichaAddGestion');
       if (addGestionBtn) addGestionBtn.onclick = ()=> openGestionModal(cuentasEst[0]?cuentasEst[0].id:null, ()=> drawDetail(est.codigo), est.codigo);
+      root.querySelectorAll('[data-editgestficha]').forEach(btn=>{
+        btn.onclick = ()=> openEditarGestionModal(btn.dataset.editgestficha, ()=> drawDetail(est.codigo));
+      });
+      root.querySelectorAll('[data-delgestficha]').forEach(btn=>{
+        btn.onclick = ()=> eliminarGestion(btn.dataset.delgestficha, ()=> drawDetail(est.codigo));
+      });
     }
   }
   search.oninput = drawList;
@@ -2100,8 +2216,9 @@ function renderHistorial(root){
       <div class="field"><label>Resultado</label><select id="hResultado"><option value="">Todos</option>${DB.catalogos.resultadosGestion.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="hExport">⭳ Exportar historial</button></div>
     </div>
-    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Familia</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th></tr></thead><tbody id="hBody"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Familia</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th><th></th></tr></thead><tbody id="hBody"></tbody></table></div>
   `;
+  const puedeEditar = perm('editarFicha');
   let filasActuales = [];
   const draw = ()=>{
     const q = (document.getElementById('hSearch').value||'').toLowerCase();
@@ -2115,8 +2232,19 @@ function renderHistorial(root){
     document.getElementById('hBody').innerHTML = rows.map(s=>{
       const est = estudianteByCodigo(s.codigoEstudiante);
       const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
-      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${fam?fam.responsable:''}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td></tr>`;
-    }).join('') || `<tr><td colspan="9" class="empty">Sin gestiones registradas.</td></tr>`;
+      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${fam?fam.responsable:''}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td>
+        <td style="white-space:nowrap;">
+          ${puedeEditar?`<button class="btn btn-sm" data-editgest="${s.id}">✏</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delgest="${s.id}">✕</button>`:''}
+        </td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="10" class="empty">Sin gestiones registradas.</td></tr>`;
+    root.querySelectorAll('[data-editgest]').forEach(btn=>{
+      btn.onclick = ()=> openEditarGestionModal(btn.dataset.editgest, draw);
+    });
+    root.querySelectorAll('[data-delgest]').forEach(btn=>{
+      btn.onclick = ()=> eliminarGestion(btn.dataset.delgest, draw);
+    });
   };
   ['hSearch','hResp','hMedio','hResultado'].forEach(id=>{
     const el = document.getElementById(id); el.addEventListener(id==='hSearch'?'input':'change', draw);

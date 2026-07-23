@@ -668,9 +668,9 @@ function cuid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.no
    ========================================================================= */
 const ROLE_LABEL = {admin:"Administrador", contable:"Contable", auxiliar:"Auxiliar"};
 const PERMS = {
-  admin:    { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:true, gestionarUsuarios:true, editarFicha:true, editarSoloPropio:false },
-  contable: { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
-  auxiliar: { verDashboard:true, editarCuenta:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
+  admin:    { verDashboard:true, editarCuenta:true, eliminarRegistros:true,  registrarGestion:true, importar:true, editarCatalogos:true, gestionarUsuarios:true, editarFicha:true, editarSoloPropio:false },
+  contable: { verDashboard:true, editarCuenta:true, eliminarRegistros:false, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
+  auxiliar: { verDashboard:true, editarCuenta:false, eliminarRegistros:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
 };
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
@@ -1171,7 +1171,7 @@ function renderReporte(root){
           ${canEditEstado?`<button class="btn btn-sm" data-editar="${r.id}">✏ Editar</button>`:''}
           ${canEditEstado?`<button class="btn btn-sm btn-primary" data-abono="${r.id}">+ Abono</button>`:''}
           <button class="btn btn-sm" data-gest="${r.id}">+ Gestión</button>
-          ${canEditEstado?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="20" class="empty">${mostrarPagadas?'No hay registros con estos filtros.':'No hay cuentas con saldo pendiente en este periodo. Active "Mostrar cuentas ya saldadas/regularizadas" para ver el historial completo.'}</td></tr>`;
@@ -1194,6 +1194,7 @@ function renderReporte(root){
     });
     tbody.querySelectorAll('[data-delcuenta]').forEach(btn=>{
       btn.onclick = async ()=>{
+        if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
         if (!confirm('¿Eliminar este registro de cuenta crítica del periodo? Esta acción no se puede deshacer. Los abonos asociados también se eliminarán.')) return;
         const cuentaId = btn.dataset.delcuenta;
         const cuentaBorrada = DB.cuentas.find(c=>c.id===cuentaId);
@@ -1322,15 +1323,16 @@ function openCuentaModal(cuentaId, periodoSugerido, onDone){
   };
 }
 
-function openGestionModal(cuentaId, onDone){
-  const c = DB.cuentas.find(c=>c.id===cuentaId);
-  const est = estudianteByCodigo(c.codigoEstudiante);
+function openGestionModal(cuentaId, onDone, codigoEstudianteFallback){
+  const c = cuentaId ? DB.cuentas.find(c=>c.id===cuentaId) : null;
+  const codigoEstudiante = c ? c.codigoEstudiante : codigoEstudianteFallback;
+  const est = estudianteByCodigo(codigoEstudiante);
   const root = document.getElementById('modalRoot');
   root.innerHTML = `
   <div class="modal-bg" id="mbg">
     <div class="modal">
       <h3>Registrar gestión</h3>
-      <p class="small">${est?est.nombre:c.codigoEstudiante} · ${c.codigoEstudiante}</p>
+      <p class="small">${est?est.nombre:codigoEstudiante} · ${codigoEstudiante}</p>
       <div class="formgrid">
         <div><label>Fecha</label><input type="date" id="gFecha" value="${new Date().toISOString().slice(0,10)}"></div>
         <div><label>Responsable</label><select id="gResp">${DB.catalogos.responsables.map(r=>`<option ${r===SESSION.usuario?'selected':''}>${r}</option>`).join('')}</select></div>
@@ -1349,16 +1351,15 @@ function openGestionModal(cuentaId, onDone){
   document.getElementById('gCancel').onclick = closeModal;
   document.getElementById('gGuardar').onclick = async ()=>{
     const seg = {
-      id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: c.codigoEstudiante,
+      id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: codigoEstudiante,
       responsable: document.getElementById('gResp').value, medio: document.getElementById('gMedio').value,
       resultado: document.getElementById('gResultado').value, proximaGestion: document.getElementById('gProxima').value,
       observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario
     };
     DB.seguimientos.push(seg);
-    c.fechaUltimaGestion = seg.fecha;
-    if (seg.proximaGestion) c.proximoSeguimiento = seg.proximaGestion;
-    await saveSeguimientos(); await saveCuentas();
-    registrarAuditoria('Gestión registrada', `${c.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
+    if (c){ c.fechaUltimaGestion = seg.fecha; if (seg.proximaGestion) c.proximoSeguimiento = seg.proximaGestion; }
+    await saveSeguimientos(); if (c) await saveCuentas();
+    registrarAuditoria('Gestión registrada', `${codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
     closeModal(); if (onDone) onDone();
   };
 }
@@ -1894,11 +1895,14 @@ function renderFichas(root){
         <table><thead><tr><th>Actividad</th><th>Periodo</th><th>Costo</th><th>Estado de pago</th><th>Fecha de pago</th>${editable?'<th></th>':''}</tr></thead>
         <tbody>${acts.length ? acts.map(a=>`<tr>
           <td>${a.actividad}</td>
-          <td class="mono">${a.periodo}</td>
-          <td class="mono">${fmtMoney(a.costo)}</td>
+          <td class="mono">${editable?`<input type="text" class="actPeriodoEdit" data-id="${a.id}" value="${a.periodo}" style="width:100px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-family:var(--font-mono);font-size:12px;">`:a.periodo}</td>
+          <td class="mono">${editable?`<input type="number" min="0" step="0.01" class="actCostoEdit" data-id="${a.id}" value="${a.costo}" style="width:90px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-family:var(--font-mono);font-size:12px;">`:fmtMoney(a.costo)}</td>
           <td>${a.pagado ? `<span class="badge b-verde"><span class="dot dot-verde"></span>Pagado</span>` : `<span class="badge b-rojo"><span class="dot dot-rojo"></span>Pendiente</span>`}</td>
           <td class="mono">${a.fechaPago||'—'}</td>
-          ${editable?`<td><button class="btn btn-sm ${a.pagado?'':'btn-primary'}" data-togglepago="${a.id}">${a.pagado?'Marcar pendiente':'Marcar pagado'}</button></td>`:''}
+          ${editable?`<td style="white-space:nowrap;">
+            <button class="btn btn-sm ${a.pagado?'':'btn-primary'}" data-togglepago="${a.id}">${a.pagado?'Marcar pendiente':'Marcar pagado'}</button>
+            ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delact="${a.id}" title="Eliminar esta actividad">✕</button>`:''}
+          </td>`:''}
         </tr>`).join('') : `<tr><td colspan="${editable?6:5}" class="empty">Sin actividades registradas.</td></tr>`}</tbody></table>
       </div>
       ${editable?`<div class="addrow">
@@ -1918,7 +1922,10 @@ function renderFichas(root){
       <div class="tablewrap" style="max-height:200px;"><table><thead><tr><th>Fecha</th><th>Periodo aplicado</th><th>Monto</th><th>Observaciones</th><th>Registrado por</th></tr></thead>
       <tbody>${abonosEst.map(a=>{ const cta = DB.cuentas.find(c=>c.id===a.cuentaId); return `<tr><td class="mono">${a.fecha}</td><td class="mono">${cta?cta.periodo:'—'}</td><td class="mono">${fmtMoney(a.monto)}</td><td class="small">${a.observaciones||''}</td><td class="small">${a.registradoPor||''}</td></tr>`; }).join('')||'<tr><td colspan="5" class="empty">Sin abonos registrados.</td></tr>'}</tbody></table></div>
       <hr class="sep">
-      <h2>Historial de seguimientos</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2>Historial de seguimientos</h2>
+        ${editable ? `<button class="btn btn-sm btn-primary" id="fichaAddGestion">+ Registrar gestión</button>` : ''}
+      </div>
       <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span></div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
     `;
     if (editable){
@@ -1950,8 +1957,42 @@ function renderFichas(root){
           drawDetail(est.codigo);
         };
       });
+      root.querySelectorAll('.actCostoEdit').forEach(inp=>{
+        inp.onchange = async ()=>{
+          const ea = DB.estudianteActividades.find(x=>x.id===inp.dataset.id);
+          if (!ea) return;
+          ea.costo = Number(inp.value||0);
+          await saveActividades();
+          registrarAuditoria('Costo de actividad editado', `${est.codigo} · ${ea.actividad} · ${ea.periodo} · ${fmtMoney(ea.costo)}`);
+        };
+      });
+      root.querySelectorAll('.actPeriodoEdit').forEach(inp=>{
+        inp.onchange = async ()=>{
+          const ea = DB.estudianteActividades.find(x=>x.id===inp.dataset.id);
+          if (!ea) return;
+          const nuevo = inp.value.trim();
+          if (!nuevo){ alert('El periodo no puede quedar vacío.'); inp.value = ea.periodo; return; }
+          ea.periodo = nuevo;
+          await saveActividades();
+          registrarAuditoria('Periodo de actividad editado', `${est.codigo} · ${ea.actividad} · ${nuevo}`);
+        };
+      });
+      root.querySelectorAll('[data-delact]').forEach(btn=>{
+        btn.onclick = async ()=>{
+          if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+          const ea = DB.estudianteActividades.find(x=>x.id===btn.dataset.delact);
+          if (!ea) return;
+          if (!confirm(`¿Eliminar la actividad "${ea.actividad}" (${ea.periodo}) de este estudiante? Esta acción no se puede deshacer.`)) return;
+          DB.estudianteActividades = DB.estudianteActividades.filter(x=>x.id!==ea.id);
+          await saveActividades();
+          registrarAuditoria('Actividad eliminada', `${est.codigo} · ${ea.actividad} · ${ea.periodo}`);
+          drawDetail(est.codigo);
+        };
+      });
       const addAbonoBtn = document.getElementById('fichaAddAbono');
       if (addAbonoBtn) addAbonoBtn.onclick = ()=> openAbonoModal(cuentasEst[0].id, ()=> drawDetail(est.codigo));
+      const addGestionBtn = document.getElementById('fichaAddGestion');
+      if (addGestionBtn) addGestionBtn.onclick = ()=> openGestionModal(cuentasEst[0]?cuentasEst[0].id:null, ()=> drawDetail(est.codigo), est.codigo);
     }
   }
   search.oninput = drawList;
@@ -2057,9 +2098,11 @@ function renderHistorial(root){
       <div class="field"><label>Responsable</label><select id="hResp"><option value="">Todos</option>${DB.catalogos.responsables.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <div class="field"><label>Medio</label><select id="hMedio"><option value="">Todos</option>${DB.catalogos.mediosContacto.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <div class="field"><label>Resultado</label><select id="hResultado"><option value="">Todos</option>${DB.catalogos.resultadosGestion.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="hExport">⭳ Exportar historial</button></div>
     </div>
-    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th></tr></thead><tbody id="hBody"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Familia</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th></tr></thead><tbody id="hBody"></tbody></table></div>
   `;
+  let filasActuales = [];
   const draw = ()=>{
     const q = (document.getElementById('hSearch').value||'').toLowerCase();
     const resp = document.getElementById('hResp').value, medio = document.getElementById('hMedio').value, resultado = document.getElementById('hResultado').value;
@@ -2068,14 +2111,25 @@ function renderHistorial(root){
     if (resp) rows = rows.filter(s=>s.responsable===resp);
     if (medio) rows = rows.filter(s=>s.medio===medio);
     if (resultado) rows = rows.filter(s=>s.resultado===resultado);
+    filasActuales = rows;
     document.getElementById('hBody').innerHTML = rows.map(s=>{
       const est = estudianteByCodigo(s.codigoEstudiante);
-      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td></tr>`;
-    }).join('') || `<tr><td colspan="8" class="empty">Sin gestiones registradas.</td></tr>`;
+      const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
+      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${fam?fam.responsable:''}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td></tr>`;
+    }).join('') || `<tr><td colspan="9" class="empty">Sin gestiones registradas.</td></tr>`;
   };
   ['hSearch','hResp','hMedio','hResultado'].forEach(id=>{
     const el = document.getElementById(id); el.addEventListener(id==='hSearch'?'input':'change', draw);
   });
+  document.getElementById('hExport').onclick = ()=> exportCSV(filasActuales.map(s=>{
+    const est = estudianteByCodigo(s.codigoEstudiante);
+    const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
+    return {
+      Fecha:s.fecha, Codigo_Estudiante:s.codigoEstudiante, Estudiante:est?est.nombre:'', Familia:fam?fam.responsable:'',
+      Responsable:s.responsable, Medio:s.medio, Resultado:s.resultado, Proxima_Gestion:s.proximaGestion||'',
+      Observaciones:s.observaciones||'', Registrado_Por:s.creadoPor||''
+    };
+  }), `historial_seguimiento_${new Date().toISOString().slice(0,10)}.csv`);
   draw();
 }
 

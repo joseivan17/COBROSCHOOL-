@@ -716,7 +716,7 @@ const PERMS = {
 // un cambio y no ves esta fecha reflejada en la app (arriba a la derecha, o en la pantalla de
 // inicio de sesión), significa que tu navegador o GitHub Pages todavía están sirviendo la
 // versión anterior en caché — no que el cambio no se haya guardado.
-const APP_VERSION = '2026-07-30.2';
+const APP_VERSION = '2026-07-30.3';
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
 
@@ -909,7 +909,11 @@ function actividadesPendientesDeEstudiante(codigoEstudiante){
 function sincronizarResumenGestionEstudiante(codigoEstudiante){
   const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante);
   if (!cuentasEst.length) return [];
-  const segsEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  // Se ordena primero por fecha (lo que la persona escribió) y, si varias gestiones comparten
+  // el mismo día, se desempata por la marca de tiempo real de creación — así la que de verdad
+  // se registró más reciente es la que manda, no una anterior del mismo día por casualidad de orden.
+  const segsEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante)
+    .sort((a,b)=> b.fecha.localeCompare(a.fecha) || (b.creadoEn||'').localeCompare(a.creadoEn||''));
   const ultimoSeg = segsEst[0];
   cuentasEst.forEach(c=>{
     c.fechaUltimaGestion = ultimoSeg ? ultimoSeg.fecha : '';
@@ -1426,7 +1430,11 @@ function openGestionModal(cuentaId, onDone, codigoEstudianteFallback){
       id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: codigoEstudiante,
       responsable: document.getElementById('gResp').value, medio: document.getElementById('gMedio').value,
       resultado: document.getElementById('gResultado').value, proximaGestion: document.getElementById('gProxima').value,
-      observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario
+      observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario,
+      // Marca de tiempo real (con hora), aparte del campo "fecha" que la persona escribe manualmente
+      // (solo día, sin hora). Se usa para saber cuál gestión fue realmente la más reciente cuando
+      // varias se registran el mismo día — el campo "fecha" solo no alcanza para desempatar bien.
+      creadoEn: new Date().toISOString()
     };
     DB.seguimientos.push(seg);
     sincronizarResumenGestionEstudiante(codigoEstudiante);
@@ -1472,6 +1480,7 @@ function openEditarGestionModal(seguimientoId, onDone){
     seg.resultado = document.getElementById('gResultado').value;
     seg.proximaGestion = document.getElementById('gProxima').value;
     seg.observaciones = document.getElementById('gObs').value;
+    seg.creadoEn = new Date().toISOString();
     sincronizarResumenGestionEstudiante(seg.codigoEstudiante);
     await saveSeguimientos(); await saveCuentas();
     registrarAuditoria('Gestión editada', `${seg.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);

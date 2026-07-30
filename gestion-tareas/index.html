@@ -527,10 +527,24 @@ async function loadRemoteTasksModule(){
     });
 
     // ---- Adjuntos: mismo shape que TASK_ATTACHMENTS ----
+    // Los archivos reales (storage_path presente) viven en un bucket privado de Supabase
+    // Storage — se firma una URL temporal (6h) para poder mostrarlos/descargarlos.
+    // Los adjuntos por enlace externo (Drive, OneDrive, etc.) no tienen storage_path y
+    // conservan su "url" tal cual.
     Object.keys(TASK_ATTACHMENTS).forEach(k=>delete TASK_ATTACHMENTS[k]);
-    (attsRes.data||[]).forEach(row=>{
+    const attsData = attsRes.data || [];
+    const storagePaths = attsData.filter(r=>r.storage_path).map(r=>r.storage_path);
+    let signedMap = {};
+    if (storagePaths.length){
+      try {
+        const { data: signedList, error: signErr } = await client.storage.from('task-attachments').createSignedUrls(storagePaths, 60*60*6);
+        if (!signErr && signedList) signedList.forEach(s=>{ if (s.signedUrl) signedMap[s.path] = s.signedUrl; });
+      } catch (e) { /* si falla la firma, se usa la última url guardada como respaldo (puede estar vencida) */ }
+    }
+    attsData.forEach(row=>{
+      const url = row.storage_path ? (signedMap[row.storage_path] || row.url) : row.url;
       (TASK_ATTACHMENTS[row.task_id] = TASK_ATTACHMENTS[row.task_id] || []).push({
-        type: row.type, name: row.name, url: row.url, _id: row.id, _remote: true,
+        type: row.type, name: row.name, url, _id: row.id, _storagePath: row.storage_path, _remote: true,
       });
     });
 
@@ -848,6 +862,7 @@ const state = {
   newTaskDeptId: null,
   deleteConfirmId: null,
   attachError: null,
+  attachUploading: false,
   taskError: null,
   checklistError: null,
   remoteTasks: { loaded: false, loading: false, error: null },
@@ -1569,11 +1584,11 @@ function renderTaskModal(taskId){
           <input type="text" name="driveUrl" placeholder="Pegar enlace de un documento, carpeta o imagen (Google Drive, OneDrive, Dropbox, etc.)…" required>
           <button type="submit" class="btn">${icon('link',{size:14})} Agregar enlace</button>
         </form>
-        <label class="btn file-label" style="cursor:pointer;">
-          ${icon('paperclip',{size:14})} Adjuntar archivo (Word, Excel, PowerPoint, PDF o imagen)
-          <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*" style="display:none;" data-action="add-file-attachment" data-taskid="${t.id}">
+        <label class="btn file-label" style="cursor:${state.attachUploading?'default':'pointer'};${state.attachUploading?'opacity:0.6;':''}">
+          ${state.attachUploading ? icon('database',{size:14})+' Subiendo…' : icon('paperclip',{size:14})+' Adjuntar archivo (Word, Excel, PowerPoint, PDF o imagen)'}
+          <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*" style="display:none;" data-action="add-file-attachment" data-taskid="${t.id}" ${state.attachUploading?'disabled':''}>
         </label>
-        <div class="form-hint" style="margin-bottom:16px;">Tamaño máximo recomendado: ~20&nbsp;MB por archivo. Los cambios, adjuntos y notas se guardan solo durante esta sesión del navegador (vista de demostración) — en la aplicación final quedarían almacenados de forma permanente.</div>
+        <div class="form-hint" style="margin-bottom:16px;">Tamaño máximo: 20&nbsp;MB por archivo.${isRealSession() ? ' Los archivos se suben a Supabase Storage y quedan guardados de forma permanente.' : ' Los cambios, adjuntos y notas se guardan solo durante esta sesión del navegador (vista de demostración) — en la aplicación real quedarían almacenados de forma permanente.'}</div>
 
         <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;gap:8px;">
           <button class="btn" data-action="delete-task-confirm" data-taskid="${t.id}" style="${confirming?'background:var(--critical);color:#fff;border-color:var(--critical);':'border-color:var(--critical);color:var(--critical);'}">${confirming?icon('alertTriangle',{size:14})+' Confirmar eliminación':icon('trash',{size:14})+' Eliminar tarea'}</button>
@@ -2465,20 +2480,43 @@ function bindEvents(){
     (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type:'link', name, url });
     render();
   }));
-  app.querySelectorAll('[data-action="add-file-attachment"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="add-file-attachment"]').forEach(el=>el.addEventListener('change', async ()=>{
     const file = el.files[0]; if (!file) return;
     const taskId = el.getAttribute('data-taskid');
     const MAX_SIZE = 20 * 1024 * 1024;
     if (file.size > MAX_SIZE){
-      state.attachError = `"${file.name}" pesa más de 20 MB — en esta vista de demostración no se puede adjuntar (el navegador guarda el archivo en memoria). Comparte un enlace en su lugar.`;
+      state.attachError = `"${file.name}" pesa más de 20 MB — no se puede adjuntar. Comparte un enlace en su lugar.`;
       el.value = '';
       render();
       return;
     }
     if (isRealSession()){
-      state.attachError = 'Adjuntar archivos (subida a Supabase Storage) todavía no está conectado — por ahora, usa "Agregar enlace" con un vínculo de Drive/OneDrive/etc., que sí queda guardado de forma real.';
-      el.value = '';
-      render();
+      const task = TASKS.find(t=>t.id===taskId);
+      const deptId = task ? task.deptId : state.deptId;
+      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g,'_');
+      const path = `${deptId}/${taskId}/${Date.now()}_${safeName}`;
+      const type = attachmentTypeForFile(file);
+      state.attachError = null; state.attachUploading = true; render();
+      try {
+        const client = getSupabaseClient();
+        const { error: upErr } = await client.storage.from('task-attachments').upload(path, file, { upsert: false, contentType: file.type || undefined });
+        if (upErr) throw upErr;
+        const { data: signed, error: signErr } = await client.storage.from('task-attachments').createSignedUrl(path, 60*60*6);
+        if (signErr) throw signErr;
+        const { data: row, error: insErr } = await client.from('task_attachments').insert({
+          task_id: taskId, type, name: file.name, url: signed.signedUrl, storage_path: path, uploaded_by: currentUser().id,
+        }).select().single();
+        if (insErr) throw insErr;
+        (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type, name: file.name, url: signed.signedUrl, _id: row.id, _storagePath: path, _remote: true });
+        state.attachUploading = false;
+        el.value = '';
+        render();
+      } catch (err) {
+        state.attachUploading = false;
+        state.attachError = friendlySupabaseError(err);
+        el.value = '';
+        render();
+      }
       return;
     }
     state.attachError = null;
@@ -2494,6 +2532,10 @@ function bindEvents(){
     if (isRealSession() && att._id){
       const client = getSupabaseClient();
       try {
+        if (att._storagePath){
+          const { error: rmErr } = await client.storage.from('task-attachments').remove([att._storagePath]);
+          if (rmErr) throw rmErr;
+        }
         const { error } = await client.from('task_attachments').delete().eq('id', att._id);
         if (error) throw error;
         TASK_ATTACHMENTS[taskId].splice(idx,1);

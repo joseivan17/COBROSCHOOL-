@@ -427,6 +427,20 @@ async function callAdminUsersFunction(action, payload){
    ========================================================= */
 function isRealSession(){ return state.realSession === true && !!getSupabaseClient(); }
 
+// Fusiona perfiles reales de Supabase en el arreglo local USERS (mismo formato que
+// usa toda la app de demostración), para que assignableUsers()/usersInDept()/etc.
+// — usadas por el tablero de tareas, el modal de tarea, el calendario, etc. —
+// funcionen igual con datos reales sin tener que reescribir esas funciones.
+function mergeRealUsersIntoLocalArray(profiles){
+  (profiles||[]).forEach(p=>{
+    const mapped = { id:p.id, name:p.name, email:p.email, deptId:p.dept_id, role:p.role, cargo:p.cargo, status:p.status, lastReviewOffset:null, _remote:true };
+    // Empareja por id (ya fusionado antes) o por correo (mismo correo que un usuario semilla
+    // de demostración, como hace el login real) para no duplicar filas en los menús.
+    const idx = USERS.findIndex(u=>u.id===p.id || u.email.toLowerCase()===p.email.toLowerCase());
+    if (idx>-1) USERS[idx] = mapped; else USERS.push(mapped);
+  });
+}
+
 async function loadRemoteUsersModule(){
   const client = getSupabaseClient();
   if (!client) return;
@@ -444,11 +458,100 @@ async function loadRemoteUsersModule(){
     state.remote.users = usersRes.data || [];
     state.remote.invites = invitesRes.data || [];
     state.remote.auditLog = auditRes.data || [];
+    mergeRealUsersIntoLocalArray(state.remote.users);
     state.remote.loading = false;
     render();
   } catch (err) {
     state.remote.loading = false;
     state.remote.error = friendlySupabaseError(err);
+    render();
+  }
+}
+
+/* =========================================================
+   MÓDULOS "TABLERO DE TAREAS" Y "CHECKLISTS" — CONECTADOS A SUPABASE
+   =========================================================
+   Estrategia: en vez de reescribir cada pantalla (Kanban, lista, modal de
+   tarea, calendario, Mis tareas, dashboard), esta carga puebla los MISMOS
+   arreglos globales que usa el modo de demostración (TASKS, TASK_NOTES,
+   TASK_ATTACHMENTS, CHECKLISTS[deptId].items, PERSONAL_CHECKLISTS[userId])
+   con datos reales de Supabase, adaptados exactamente a la misma forma que
+   ya esperan esas pantallas. Así, toda esa lógica de render sigue
+   funcionando sin cambios, tanto en modo demo como en modo real.
+   ========================================================= */
+async function loadRemoteTasksModule(){
+  const client = getSupabaseClient();
+  if (!client) return;
+  state.remoteTasks.loading = true; state.remoteTasks.error = null; render();
+  try {
+    // Asegura que USERS tenga a todo el personal real (no solo a quien inició sesión),
+    // para que los menús de "Responsable" muestren a los compañeros de verdad.
+    if (!state.remote.users) await loadRemoteUsersModule();
+
+    const results = await Promise.all([
+      client.from('tasks').select('*, resp:profiles!tasks_resp_user_id_fkey(id,name,cargo), assignedByProfile:profiles!tasks_assigned_by_user_id_fkey(name)').order('due_date'),
+      client.from('task_notes').select('*, authorProfile:profiles!task_notes_author_id_fkey(name)').order('created_at'),
+      client.from('task_attachments').select('*').order('created_at'),
+      client.from('dept_checklist_items').select('*').order('position'),
+      client.from('personal_checklist_items').select('*').eq('user_id', currentUser().id).order('position'),
+    ]);
+    const [tasksRes, notesRes, attsRes, deptClRes, personalClRes] = results;
+    if (tasksRes.error) throw tasksRes.error;
+    if (notesRes.error) throw notesRes.error;
+    if (attsRes.error) throw attsRes.error;
+    if (deptClRes.error) throw deptClRes.error;
+    if (personalClRes.error) throw personalClRes.error;
+
+    const todayD = today();
+    const dayMs = 24*60*60*1000;
+
+    // ---- Tareas: mismo shape que TASKS de demostración ----
+    TASKS.length = 0;
+    (tasksRes.data||[]).forEach(row=>{
+      TASKS.push({
+        id: row.id, deptId: row.dept_id, title: row.title, priority: row.priority, status: row.status,
+        dueOffset: 0, dueDateFixed: row.due_date,
+        resp: row.resp ? row.resp.name : '—', cargo: row.resp ? (row.resp.cargo||null) : null,
+        assignedBy: row.assignedByProfile ? row.assignedByProfile.name : null,
+        _respUserId: row.resp_user_id, _assignedByUserId: row.assigned_by_user_id, _remote: true,
+      });
+    });
+
+    // ---- Notas: mismo shape que TASK_NOTES, con "offset" calculado desde created_at ----
+    Object.keys(TASK_NOTES).forEach(k=>delete TASK_NOTES[k]);
+    (notesRes.data||[]).forEach(row=>{
+      const offset = Math.round((new Date(row.created_at) - todayD) / dayMs);
+      (TASK_NOTES[row.task_id] = TASK_NOTES[row.task_id] || []).push({
+        author: row.authorProfile ? row.authorProfile.name : '—', offset, text: row.text, _id: row.id, _remote: true,
+      });
+    });
+
+    // ---- Adjuntos: mismo shape que TASK_ATTACHMENTS ----
+    Object.keys(TASK_ATTACHMENTS).forEach(k=>delete TASK_ATTACHMENTS[k]);
+    (attsRes.data||[]).forEach(row=>{
+      (TASK_ATTACHMENTS[row.task_id] = TASK_ATTACHMENTS[row.task_id] || []).push({
+        type: row.type, name: row.name, url: row.url, _id: row.id, _remote: true,
+      });
+    });
+
+    // ---- Checklist de departamento: conserva el título de demostración, reemplaza items ----
+    const deptClByDept = {};
+    (deptClRes.data||[]).forEach(row=>{
+      (deptClByDept[row.dept_id] = deptClByDept[row.dept_id] || []).push({ t: row.text, done: row.done, _id: row.id });
+    });
+    Object.keys(CHECKLISTS).forEach(deptId=>{
+      CHECKLISTS[deptId].items = deptClByDept[deptId] || [];
+    });
+
+    // ---- Checklist personal (solo la propia, por RLS) ----
+    PERSONAL_CHECKLISTS[currentUser().id] = (personalClRes.data||[]).map(row=>({ t: row.text, done: row.done, _id: row.id }));
+
+    state.remoteTasks.loading = false;
+    state.remoteTasks.loaded = true;
+    render();
+  } catch (err) {
+    state.remoteTasks.loading = false;
+    state.remoteTasks.error = friendlySupabaseError(err);
     render();
   }
 }
@@ -695,6 +798,36 @@ const PERSONAL_CHECKLISTS = {
   'u16': [ {t:'Preparar agenda de reunión semanal', done:false} ],
 };
 
+/* =========================================================
+   INSTANTÁNEA DE LOS DATOS DE DEMOSTRACIÓN (para restaurarlos al
+   cerrar sesión real — evita que datos reales de Supabase queden
+   mezclados con el modo demo/"Ver como" si se usan ambos sin recargar
+   la página).
+   ========================================================= */
+const PRISTINE_DEMO_DATA = {
+  tasks: JSON.parse(JSON.stringify(TASKS)),
+  checklists: JSON.parse(JSON.stringify(CHECKLISTS)),
+  personalChecklists: JSON.parse(JSON.stringify(PERSONAL_CHECKLISTS)),
+  taskNotes: JSON.parse(JSON.stringify(TASK_NOTES)),
+  taskAttachments: JSON.parse(JSON.stringify(TASK_ATTACHMENTS)),
+  users: JSON.parse(JSON.stringify(USERS)),
+  auditLog: JSON.parse(JSON.stringify(AUDIT_LOG)),
+};
+function restoreDemoData(){
+  TASKS.length = 0; TASKS.push(...JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.tasks)));
+  Object.keys(CHECKLISTS).forEach(k=>delete CHECKLISTS[k]);
+  Object.assign(CHECKLISTS, JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.checklists)));
+  Object.keys(PERSONAL_CHECKLISTS).forEach(k=>delete PERSONAL_CHECKLISTS[k]);
+  Object.assign(PERSONAL_CHECKLISTS, JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.personalChecklists)));
+  Object.keys(TASK_NOTES).forEach(k=>delete TASK_NOTES[k]);
+  Object.assign(TASK_NOTES, JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.taskNotes)));
+  Object.keys(TASK_ATTACHMENTS).forEach(k=>delete TASK_ATTACHMENTS[k]);
+  Object.assign(TASK_ATTACHMENTS, JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.taskAttachments)));
+  USERS.length = 0; USERS.push(...JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.users)));
+  AUDIT_LOG.length = 0; AUDIT_LOG.push(...JSON.parse(JSON.stringify(PRISTINE_DEMO_DATA.auditLog)));
+  _taskIdCounter = TASKS.length + 1;
+}
+
 const ROLE_LABELS = { directora:'Directora', gerente:'Gerente Operativo', coordinador:'Coordinador(a)', colaborador:'Colaborador(a)' };
 const STATUS_LABELS = { pendiente:'Pendiente', progreso:'En Progreso', revision:'En Revisión', completado:'Completado', atrasado:'Atrasado' };
 const STATUS_ORDER = ['pendiente','progreso','revision','completado','atrasado'];
@@ -715,6 +848,9 @@ const state = {
   newTaskDeptId: null,
   deleteConfirmId: null,
   attachError: null,
+  taskError: null,
+  checklistError: null,
+  remoteTasks: { loaded: false, loading: false, error: null },
   inviteError: null,
   inviteBanner: null,
   personalNewItem: '',
@@ -944,6 +1080,7 @@ function bindLoginEvents(){
       state.loginError = null;
       state.loginBusy = false;
       render();
+      loadRemoteTasksModule(); // carga tareas/checklists en segundo plano, no bloquea el login
     } catch (err){
       state.loginError = 'No se pudo contactar Supabase: ' + friendlySupabaseError(err);
       state.loginBusy = false;
@@ -1018,6 +1155,7 @@ function bindLoginEvents(){
       state.currentUserId = remoteUser.id;
       state.loginBusy = false;
       render();
+      loadRemoteTasksModule(); // carga tareas/checklists en segundo plano, no bloquea el login
     } catch (err){
       state.loginError = 'No se pudo contactar Supabase: ' + friendlySupabaseError(err);
       state.loginBusy = false;
@@ -1118,7 +1256,13 @@ function renderTopbar(){
 
 function renderContent(){
   let body;
-  if (state.view==='department') body = renderDepartment();
+  const isTasksView = ['dashboard','department','calendar','mytasks'].includes(state.view) || (state.view==='settings' && !isLeadership());
+  if (isRealSession() && isTasksView && !state.remoteTasks.loaded){
+    body = state.remoteTasks.error
+      ? `<div class="panel" style="padding:20px;"><div class="invite-error" style="margin-bottom:12px;">${icon('alertTriangle',{size:14})} ${state.remoteTasks.error}</div><button class="btn" data-action="reload-tasks-module">${icon('database',{size:13})} Reintentar</button></div>`
+      : `<div class="panel" style="padding:24px;text-align:center;color:var(--text-muted);">${icon('database',{size:16})} Cargando datos institucionales desde Supabase…</div>`;
+  }
+  else if (state.view==='department') body = renderDepartment();
   else if (state.view==='calendar') body = renderCalendar();
   else if (state.view==='users') body = isRealSession() ? renderUsersRolesReal() : renderUsersRoles();
   else if (state.view==='settings') body = isLeadership() ? renderSettings() : renderMyTasks();
@@ -1237,6 +1381,7 @@ function renderDepartment(){
   <div class="section">
     <div class="checklist-card panel">
       <div class="checklist-head"><span class="title">${icon('clipboard',{size:15})} ${checklist.title}</span><span class="pct" style="color:${semaphoreColor(st.clPct)}">${st.clPct}%</span></div>
+      ${state.checklistError ? `<div class="invite-error" style="margin-bottom:8px;">${icon('alertTriangle',{size:14})} ${state.checklistError}</div>` : ''}
       <div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${st.clPct}%;background:${semaphoreColor(st.clPct)}"></div></div>
       ${checklist.items.map((it,i)=>`<div class="checklist-item ${it.done?'done':''}" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="cl-${i}" ${it.done?'checked':''} data-action="toggle-checklist" data-idx="${i}">
@@ -1252,6 +1397,7 @@ function renderDepartment(){
   </div>
 
   <div class="section">
+    ${state.taskError ? `<div class="invite-error" style="margin-bottom:10px;">${icon('alertTriangle',{size:14})} ${state.taskError}</div>` : ''}
     <div class="toolbar">
       <div class="view-tabs">
         <button class="${state.deptSubview==='kanban'?'active':''}" data-action="dept-subview" data-sub="kanban">Tablero Kanban</button>
@@ -1363,6 +1509,7 @@ function renderTaskModal(taskId){
         <button class="modal-close" data-action="close-modal">${icon('x',{size:15})}</button>
       </div>
       <div class="modal-body">
+        ${state.taskError ? `<div class="invite-error" style="margin-bottom:12px;">${icon('alertTriangle',{size:14})} ${state.taskError}</div>` : ''}
         <div style="margin-bottom:12px;">
           <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Título</label>
           <input type="text" value="${t.title.replace(/"/g,'&quot;')}" data-action="modal-title" data-taskid="${t.id}" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font-size:13.5px;font-weight:600;">
@@ -1911,6 +2058,7 @@ function renderMyTasks(){
     <div class="section-head"><h2>Mi checklist personal</h2><span class="hint">Privado — solo lo ves tú</span></div>
     <div class="checklist-card panel">
       <div class="checklist-head"><span class="title">${icon('clipboard',{size:15})} Pendientes personales</span><span class="pct" style="color:${semaphoreColor(clPct)}">${checklist.length? clPct+'%' : '—'}</span></div>
+      ${state.checklistError ? `<div class="invite-error" style="margin-bottom:8px;">${icon('alertTriangle',{size:14})} ${state.checklistError}</div>` : ''}
       ${checklist.length>0 ? `<div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${clPct}%;background:${semaphoreColor(clPct)}"></div></div>` : ''}
       ${checklist.map((it,i)=>`<div class="checklist-item ${it.done?'done':''}" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" id="pcl-${i}" ${it.done?'checked':''} data-action="toggle-personal" data-idx="${i}">
@@ -1933,30 +2081,72 @@ function renderMyTasks(){
 function bindEvents(){
   const app = document.getElementById('app');
 
-  app.querySelectorAll('[data-action="open-dashboard"]').forEach(el=>el.addEventListener('click',()=>{ state.view='dashboard'; render(); }));
-  app.querySelectorAll('[data-action="open-calendar"]').forEach(el=>el.addEventListener('click',()=>{ state.view='calendar'; state.calSelected=null; render(); }));
+  app.querySelectorAll('[data-action="open-dashboard"]').forEach(el=>el.addEventListener('click',()=>{
+    state.view='dashboard'; render();
+    if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
+  }));
+  app.querySelectorAll('[data-action="open-calendar"]').forEach(el=>el.addEventListener('click',()=>{
+    state.view='calendar'; state.calSelected=null; render();
+    if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
+  }));
   app.querySelectorAll('[data-action="open-dept"]').forEach(el=>el.addEventListener('click',()=>{
     state.view='department'; state.deptId=el.getAttribute('data-dept'); state.deptSubview='kanban';
-    state.filters={resp:'all',status:'all',priority:'all'}; render();
+    state.filters={resp:'all',status:'all',priority:'all'}; state.checklistError=null; render();
+    if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
   }));
+  app.querySelectorAll('[data-action="reload-tasks-module"]').forEach(el=>el.addEventListener('click', loadRemoteTasksModule));
   app.querySelectorAll('[data-action="dept-subview"]').forEach(el=>el.addEventListener('click',()=>{ state.deptSubview=el.getAttribute('data-sub'); render(); }));
   app.querySelectorAll('[data-action="filter"]').forEach(el=>el.addEventListener('change',()=>{
     state.filters[el.getAttribute('data-filter')] = el.value; render();
   }));
-  app.querySelectorAll('[data-action="toggle-checklist"]').forEach(el=>el.addEventListener('change',()=>{
+  app.querySelectorAll('[data-action="toggle-checklist"]').forEach(el=>el.addEventListener('change', async ()=>{
     const idx = parseInt(el.getAttribute('data-idx'),10);
-    CHECKLISTS[state.deptId].items[idx].done = el.checked;
+    const item = CHECKLISTS[state.deptId].items[idx];
+    const newDone = el.checked;
+    if (isRealSession() && item._id){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('dept_checklist_items').update({ done: newDone }).eq('id', item._id);
+        if (error) throw error;
+        item.done = newDone;
+        render();
+      } catch (err) { state.checklistError = friendlySupabaseError(err); el.checked = item.done; render(); }
+      return;
+    }
+    item.done = newDone;
     render();
   }));
-  app.querySelectorAll('[data-action="remove-checklist-item"]').forEach(el=>el.addEventListener('click',()=>{
+  app.querySelectorAll('[data-action="remove-checklist-item"]').forEach(el=>el.addEventListener('click', async ()=>{
     const idx = parseInt(el.getAttribute('data-idx'),10);
+    const item = CHECKLISTS[state.deptId].items[idx];
+    if (isRealSession() && item._id){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('dept_checklist_items').delete().eq('id', item._id);
+        if (error) throw error;
+        CHECKLISTS[state.deptId].items.splice(idx,1);
+        render();
+      } catch (err) { state.checklistError = friendlySupabaseError(err); render(); }
+      return;
+    }
     CHECKLISTS[state.deptId].items.splice(idx,1);
     render();
   }));
-  app.querySelectorAll('[data-action="add-checklist-item"]').forEach(form=>form.addEventListener('submit', e=>{
+  app.querySelectorAll('[data-action="add-checklist-item"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
     const text = form.item.value.trim();
     if (!text){ showFormError(form, 'Escribe un elemento antes de agregarlo.'); return; }
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const position = CHECKLISTS[state.deptId].items.length;
+        const { data, error } = await client.from('dept_checklist_items').insert({ dept_id: state.deptId, text, done:false, position }).select().single();
+        if (error) throw error;
+        CHECKLISTS[state.deptId].items.push({ t: data.text, done: data.done, _id: data.id });
+        render();
+      } catch (err) { showFormError(form, friendlySupabaseError(err)); }
+      return;
+    }
     CHECKLISTS[state.deptId].items.push({ t: text, done: false });
     render();
   }));
@@ -1983,11 +2173,22 @@ function bindEvents(){
   app.querySelectorAll('.kanban-col-body').forEach(col=>{
     col.addEventListener('dragover', e=>{ e.preventDefault(); col.classList.add('drag-over'); });
     col.addEventListener('dragleave', ()=> col.classList.remove('drag-over'));
-    col.addEventListener('drop', e=>{
+    col.addEventListener('drop', async e=>{
       e.preventDefault(); col.classList.remove('drag-over');
       const taskId = e.dataTransfer.getData('text/plain');
       const task = TASKS.find(t=>t.id===taskId);
-      if (task){ task.status = col.getAttribute('data-status'); render(); }
+      if (!task) return;
+      const newStatus = col.getAttribute('data-status');
+      if (isRealSession()){
+        const client = getSupabaseClient();
+        try {
+          const { error } = await client.from('tasks').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', taskId);
+          if (error) throw error;
+          task.status = newStatus; render();
+        } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+        return;
+      }
+      task.status = newStatus; render();
     });
   });
 
@@ -2004,13 +2205,26 @@ function bindEvents(){
     state.view='users'; state.inviteError=null; state.inviteBanner=null; render();
     if (isRealSession() && !state.remote.users && !state.remote.loading) loadRemoteUsersModule();
   }));
-  app.querySelectorAll('[data-action="open-mytasks"]').forEach(el=>el.addEventListener('click',()=>{ state.view='mytasks'; render(); }));
-  app.querySelectorAll('[data-action="open-settings"]').forEach(el=>el.addEventListener('click',()=>{ state.view='settings'; render(); }));
+  app.querySelectorAll('[data-action="open-mytasks"]').forEach(el=>el.addEventListener('click',()=>{
+    state.view='mytasks'; render();
+    if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
+  }));
+  app.querySelectorAll('[data-action="open-settings"]').forEach(el=>el.addEventListener('click',()=>{
+    state.view='settings'; render();
+    if (isRealSession() && !isLeadership() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
+  }));
   app.querySelectorAll('[data-action="logout"]').forEach(el=>el.addEventListener('click', async ()=>{
     const client = getSupabaseClient();
     if (client) { try { await client.auth.signOut(); } catch(e){ /* ignorar: de todas formas cerramos la sesión local */ } }
     state.authed = false; state.realSession = false; state.loginError = null; state.loginEmailValue=''; state.view='dashboard';
-    state.remote = { users: null, invites: null, auditLog: null, loading: false, error: null, savingId: null };
+    state.currentUserId = 'u-admin';
+    state.remote = {
+      users: null, invites: null, auditLog: null, loading: false, error: null, savingId: null,
+      createMode: 'create', createBusy: false, createError: null, createBanner: null,
+      editUserId: null, editError: null, deleteConfirmId: null,
+    };
+    state.remoteTasks = { loaded: false, loading: false, error: null };
+    restoreDemoData(); // evita mezclar datos reales de Supabase con el modo demo/"Ver como"
     render();
   }));
   app.querySelectorAll('[data-action="clear-supabase"]').forEach(el=>el.addEventListener('click',()=>{
@@ -2052,49 +2266,116 @@ function bindEvents(){
   // Modal de tarea (ver / editar / adjuntos / notas)
   app.querySelectorAll('[data-action="open-task-modal"]').forEach(el=>el.addEventListener('click', e=>{
     e.stopPropagation();
-    state.taskModalId = el.getAttribute('data-taskid'); state.newTaskDeptId = null; state.deleteConfirmId = null; state.attachError = null; render();
+    state.taskModalId = el.getAttribute('data-taskid'); state.newTaskDeptId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; render();
   }));
   app.querySelectorAll('[data-action="close-modal"]').forEach(el=>el.addEventListener('click', e=>{
     if (el.classList.contains('modal-overlay') && e.target !== el) return;
-    state.taskModalId = null; state.deleteConfirmId = null; state.attachError = null; render();
+    state.taskModalId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; render();
   }));
-  app.querySelectorAll('[data-action="modal-status"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="modal-status"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    if (task) task.status = el.value;
-    render();
+    if (!task) return;
+    const newVal = el.value;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ status: newVal, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.status = newVal; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.status = newVal; render();
   }));
-  app.querySelectorAll('[data-action="modal-title"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="modal-title"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    if (task && el.value.trim()) task.title = el.value.trim();
-    render();
+    if (!task || !el.value.trim()) return;
+    const newVal = el.value.trim();
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ title: newVal, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.title = newVal; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.title = newVal; render();
   }));
-  app.querySelectorAll('[data-action="modal-resp"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="modal-resp"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
     const u = USERS.find(x=>x.id===el.value);
-    if (task && u){ task.resp = u.name; task.cargo = u.cargo || null; }
-    render();
+    if (!task || !u) return;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ resp_user_id: u.id, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.resp = u.name; task.cargo = u.cargo || null; task._respUserId = u.id; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.resp = u.name; task.cargo = u.cargo || null; render();
   }));
-  app.querySelectorAll('[data-action="modal-priority"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="modal-priority"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    if (task) task.priority = el.value;
-    render();
+    if (!task) return;
+    const newVal = el.value;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ priority: newVal, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.priority = newVal; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.priority = newVal; render();
   }));
-  app.querySelectorAll('[data-action="modal-due"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="modal-due"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    if (task && el.value) task.dueDateFixed = el.value;
-    render();
+    if (!task || !el.value) return;
+    const newVal = el.value;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ due_date: newVal, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.dueDateFixed = newVal; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.dueDateFixed = newVal; render();
   }));
-  app.querySelectorAll('[data-action="add-note"]').forEach(form=>form.addEventListener('submit', e=>{
+  app.querySelectorAll('[data-action="add-note"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
     const taskId = form.getAttribute('data-taskid');
     const text = form.noteText.value.trim();
     if (!text) return;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { data, error } = await client.from('task_notes').insert({ task_id: taskId, author_id: currentUser().id, text }).select().single();
+        if (error) throw error;
+        (TASK_NOTES[taskId] = TASK_NOTES[taskId] || []).push({ author: currentUser().name, offset:0, text, _id: data.id, _remote:true });
+        render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
     (TASK_NOTES[taskId] = TASK_NOTES[taskId] || []).push({ author: currentUser().name, offset:0, text });
     render();
   }));
-  app.querySelectorAll('[data-action="delete-task-confirm"]').forEach(el=>el.addEventListener('click', ()=>{
+  app.querySelectorAll('[data-action="delete-task-confirm"]').forEach(el=>el.addEventListener('click', async ()=>{
     const id = el.getAttribute('data-taskid');
     if (state.deleteConfirmId === id){
+      if (isRealSession()){
+        const client = getSupabaseClient();
+        try {
+          // task_notes/task_attachments tienen "on delete cascade": se limpian solas.
+          const { error } = await client.from('tasks').delete().eq('id', id);
+          if (error) throw error;
+        } catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+      }
       const idx = TASKS.findIndex(t=>t.id===id);
       if (idx>-1) TASKS.splice(idx,1);
       delete TASK_ATTACHMENTS[id]; delete TASK_NOTES[id];
@@ -2114,7 +2395,7 @@ function bindEvents(){
     if (el.classList.contains('modal-overlay') && e.target !== el) return;
     state.newTaskDeptId = null; render();
   }));
-  app.querySelectorAll('[data-action="create-task"]').forEach(form=>form.addEventListener('submit', e=>{
+  app.querySelectorAll('[data-action="create-task"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
     const deptId = form.getAttribute('data-dept');
     const titleVal = form.title.value.trim();
@@ -2124,25 +2405,64 @@ function bindEvents(){
       return;
     }
     const respUser = USERS.find(u=>u.id===form.respId.value);
+    const dueVal = form.due.value || toISODate(addDays(today(),7));
+    const noteVal = form.note.value.trim();
+    if (isRealSession()){
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const client = getSupabaseClient();
+        const { data: newTask, error } = await client.from('tasks').insert({
+          dept_id: deptId, title: titleVal, priority: form.priority.value, status: form.status.value,
+          due_date: dueVal, resp_user_id: respUser ? respUser.id : null, assigned_by_user_id: currentUser().id,
+        }).select().single();
+        if (error) throw error;
+        if (noteVal) await client.from('task_notes').insert({ task_id: newTask.id, author_id: currentUser().id, text: noteVal });
+        TASKS.push({
+          id: newTask.id, deptId, title: titleVal, priority: newTask.priority, status: newTask.status,
+          dueOffset: 0, dueDateFixed: newTask.due_date,
+          resp: respUser ? respUser.name : '—', cargo: respUser ? (respUser.cargo||null) : null,
+          assignedBy: currentUser().name, _respUserId: newTask.resp_user_id, _assignedByUserId: newTask.assigned_by_user_id, _remote:true,
+        });
+        if (noteVal) TASK_NOTES[newTask.id] = [{ author: currentUser().name, offset:0, text: noteVal, _remote:true }];
+        state.newTaskDeptId = null;
+        render();
+      } catch (err) {
+        if (submitBtn) submitBtn.disabled = false;
+        showFormError(form, friendlySupabaseError(err));
+      }
+      return;
+    }
     const id = newTaskId();
     TASKS.push({
       id, deptId, title: titleVal, priority: form.priority.value, status: form.status.value,
-      dueOffset: 0, dueDateFixed: form.due.value || toISODate(addDays(today(),7)),
+      dueOffset: 0, dueDateFixed: dueVal,
       resp: respUser ? respUser.name : '—', cargo: respUser ? (respUser.cargo || null) : null,
       assignedBy: currentUser().name
     });
-    if (form.note.value.trim()) TASK_NOTES[id] = [{ author: currentUser().name, offset:0, text: form.note.value.trim() }];
+    if (noteVal) TASK_NOTES[id] = [{ author: currentUser().name, offset:0, text: noteVal }];
     state.newTaskDeptId = null;
     render();
   }));
 
-  app.querySelectorAll('[data-action="add-drive-link"]').forEach(form=>form.addEventListener('submit', e=>{
+  app.querySelectorAll('[data-action="add-drive-link"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
     const taskId = form.getAttribute('data-taskid');
     const url = form.driveUrl.value.trim();
     if (!url) return;
     state.attachError = null;
-    (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type:'link', name: url.length>60 ? url.slice(0,60)+'…' : url, url });
+    const name = url.length>60 ? url.slice(0,60)+'…' : url;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { data, error } = await client.from('task_attachments').insert({ task_id: taskId, type:'link', name, url, uploaded_by: currentUser().id }).select().single();
+        if (error) throw error;
+        (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type:'link', name, url, _id: data.id, _remote:true });
+        render();
+      } catch (err) { state.attachError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type:'link', name, url });
     render();
   }));
   app.querySelectorAll('[data-action="add-file-attachment"]').forEach(el=>el.addEventListener('change', ()=>{
@@ -2155,14 +2475,32 @@ function bindEvents(){
       render();
       return;
     }
+    if (isRealSession()){
+      state.attachError = 'Adjuntar archivos (subida a Supabase Storage) todavía no está conectado — por ahora, usa "Agregar enlace" con un vínculo de Drive/OneDrive/etc., que sí queda guardado de forma real.';
+      el.value = '';
+      render();
+      return;
+    }
     state.attachError = null;
     const url = URL.createObjectURL(file);
     const type = attachmentTypeForFile(file);
     (TASK_ATTACHMENTS[taskId] = TASK_ATTACHMENTS[taskId] || []).push({ type, name: file.name, url });
     render();
   }));
-  app.querySelectorAll('[data-action="remove-attachment"]').forEach(el=>el.addEventListener('click', ()=>{
+  app.querySelectorAll('[data-action="remove-attachment"]').forEach(el=>el.addEventListener('click', async ()=>{
     const taskId = el.getAttribute('data-taskid'); const idx = parseInt(el.getAttribute('data-idx'),10);
+    const att = (TASK_ATTACHMENTS[taskId]||[])[idx];
+    if (!att) return;
+    if (isRealSession() && att._id){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('task_attachments').delete().eq('id', att._id);
+        if (error) throw error;
+        TASK_ATTACHMENTS[taskId].splice(idx,1);
+        render();
+      } catch (err) { state.attachError = friendlySupabaseError(err); render(); }
+      return;
+    }
     TASK_ATTACHMENTS[taskId].splice(idx,1);
     render();
   }));
@@ -2426,25 +2764,67 @@ function bindEvents(){
   }));
 
   // Mis tareas
-  app.querySelectorAll('[data-action="update-my-task-status"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="update-my-task-status"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    if (task) task.status = el.value;
-    render();
+    if (!task) return;
+    const newVal = el.value;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('tasks').update({ status: newVal, updated_at: new Date().toISOString() }).eq('id', task.id);
+        if (error) throw error;
+        task.status = newVal; render();
+      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
+      return;
+    }
+    task.status = newVal; render();
   }));
-  app.querySelectorAll('[data-action="toggle-personal"]').forEach(el=>el.addEventListener('change', ()=>{
+  app.querySelectorAll('[data-action="toggle-personal"]').forEach(el=>el.addEventListener('change', async ()=>{
     const idx = parseInt(el.getAttribute('data-idx'),10);
-    PERSONAL_CHECKLISTS[currentUser().id][idx].done = el.checked;
-    render();
+    const item = PERSONAL_CHECKLISTS[currentUser().id][idx];
+    const newDone = el.checked;
+    if (isRealSession() && item._id){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('personal_checklist_items').update({ done: newDone }).eq('id', item._id);
+        if (error) throw error;
+        item.done = newDone; render();
+      } catch (err) { state.checklistError = friendlySupabaseError(err); el.checked = item.done; render(); }
+      return;
+    }
+    item.done = newDone; render();
   }));
-  app.querySelectorAll('[data-action="add-personal-item"]').forEach(form=>form.addEventListener('submit', e=>{
+  app.querySelectorAll('[data-action="add-personal-item"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
     const val = form.item.value.trim();
     if (!val){ showFormError(form, 'Escribe un pendiente antes de agregarlo.'); return; }
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try {
+        const list = PERSONAL_CHECKLISTS[currentUser().id] || [];
+        const { data, error } = await client.from('personal_checklist_items').insert({ user_id: currentUser().id, text: val, done:false, position: list.length }).select().single();
+        if (error) throw error;
+        (PERSONAL_CHECKLISTS[currentUser().id] = list).push({ t: data.text, done: data.done, _id: data.id });
+        render();
+      } catch (err) { showFormError(form, friendlySupabaseError(err)); }
+      return;
+    }
     (PERSONAL_CHECKLISTS[currentUser().id] = PERSONAL_CHECKLISTS[currentUser().id] || []).push({ t: val, done:false });
     render();
   }));
-  app.querySelectorAll('[data-action="remove-personal-item"]').forEach(el=>el.addEventListener('click', ()=>{
+  app.querySelectorAll('[data-action="remove-personal-item"]').forEach(el=>el.addEventListener('click', async ()=>{
     const idx = parseInt(el.getAttribute('data-idx'),10);
+    const item = PERSONAL_CHECKLISTS[currentUser().id][idx];
+    if (isRealSession() && item._id){
+      const client = getSupabaseClient();
+      try {
+        const { error } = await client.from('personal_checklist_items').delete().eq('id', item._id);
+        if (error) throw error;
+        PERSONAL_CHECKLISTS[currentUser().id].splice(idx,1);
+        render();
+      } catch (err) { state.checklistError = friendlySupabaseError(err); render(); }
+      return;
+    }
     PERSONAL_CHECKLISTS[currentUser().id].splice(idx,1);
     render();
   }));

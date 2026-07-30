@@ -175,6 +175,45 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:18px 0;}
 .login-link{text-align:center;font-size:12.3px;color:var(--accent-dark);cursor:pointer;font-weight:600;margin-top:6px;}
 .login-back{font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:14px;display:inline-block;}
 .login-note{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:11.5px;color:var(--muted);margin-top:16px;}
+
+/* ---------- Animaciones básicas ---------- */
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes modalPop{from{opacity:0;transform:scale(.95) translateY(4px);}to{opacity:1;transform:scale(1) translateY(0);}}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;}
+}
+
+.view-anim{animation:fadeSlideIn .25s ease both;}
+.card{animation:fadeSlideIn .25s ease both;}
+.modal-bg{animation:fadeIn .15s ease both;}
+.modal{animation:modalPop .2s cubic-bezier(.22,.9,.32,1.1) both;}
+
+.btn{transition:background-color .15s ease, border-color .15s ease, color .15s ease, transform .08s ease, box-shadow .15s ease;}
+.btn:hover{box-shadow:0 1px 4px rgba(15,33,56,.08);}
+.btn:active{transform:scale(.95);}
+.btn-primary:hover{box-shadow:0 2px 8px rgba(43,110,201,.25);}
+
+.navlink{transition:background-color .15s ease, color .15s ease, padding-left .15s ease;}
+.navlink:hover:not(.active){background:rgba(255,255,255,.06);color:#fff;padding-left:15px;}
+.navlink.active{transition:background-color .2s ease;}
+
+tr{transition:background-color .12s ease;}
+.linklike-row:hover td{background:var(--accent-light) !important;}
+
+.stat{transition:transform .18s ease, box-shadow .18s ease;}
+.stat:hover{transform:translateY(-3px);box-shadow:0 6px 16px rgba(15,33,56,.09);}
+
+.badge, .storage-badge, .pill-warn, .pill-error, .pill-ok{transition:background-color .15s ease, transform .15s ease;}
+
+.tab{transition:color .15s ease, border-color .15s ease;}
+
+input, select, textarea{transition:border-color .15s ease, box-shadow .15s ease;}
+input:focus, select:focus, textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+
+.dropzone{transition:border-color .15s ease, color .15s ease, background-color .15s ease;}
+
+.timeline .tl-item{animation:fadeSlideIn .2s ease both;}
 </style>
 </head>
 <body>
@@ -770,6 +809,12 @@ function renderAll(){
     fichas: renderFichas, historial: renderHistorial, catalogos: renderCatalogos, usuarios: renderUsuarios,
     respaldo: renderRespaldo, auditoria: renderAuditoria, basededatos: renderBaseDeDatos
   })[currentView](view);
+  // Reinicia la animación de aparición en cada cambio de módulo: como #view no se recrea
+  // (solo se reemplaza su contenido), hay que quitar y volver a poner la clase, forzando
+  // un reflow en medio, para que la animación se repita en vez de jugarse una sola vez.
+  view.classList.remove('view-anim');
+  void view.offsetWidth;
+  view.classList.add('view-anim');
 }
 
 /* =========================================================================
@@ -808,7 +853,11 @@ function periodosDisponibles(){
 function ultimoPeriodo(){ const p = periodosDisponibles(); return p[0] || null; }
 function diasDesde(fechaStr){
   if(!fechaStr) return Infinity;
-  const d = new Date(fechaStr); const now = new Date();
+  // "2026-11-08" sin hora se interpreta como medianoche UTC por defecto en JS — se fuerza a
+  // medianoche LOCAL para que el conteo de días no se desfase según la zona horaria del usuario.
+  const partes = String(fechaStr).split('-').map(Number);
+  const d = (partes.length===3) ? new Date(partes[0], partes[1]-1, partes[2]) : new Date(fechaStr);
+  const now = new Date();
   return Math.floor((now-d)/(1000*60*60*24));
 }
 
@@ -845,6 +894,20 @@ function actividadesPendientesDeEstudiante(codigoEstudiante){
 }
 // Todos los estudiantes que pertenecen a una misma familia (por Codigo_Familia) — para cuando
 // una familia tiene más de un hijo y se necesita ver la deuda de todos juntos, no uno a la vez.
+// La cuenta crítica más reciente de un estudiante guarda un resumen (fechaUltimaGestion,
+// proximoSeguimiento) para que el Dashboard no tenga que recorrer todos los seguimientos cada vez.
+// Este resumen se recalcula SIEMPRE desde los seguimientos reales — nunca se deja un valor viejo
+// a medias — para que crear, editar o eliminar una gestión se refleje de inmediato en el Dashboard.
+function sincronizarResumenGestionEstudiante(codigoEstudiante){
+  const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.periodo.localeCompare(a.periodo));
+  const cuentaMasReciente = cuentasEst[0];
+  if (!cuentaMasReciente) return null;
+  const segsEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  const ultimoSeg = segsEst[0];
+  cuentaMasReciente.fechaUltimaGestion = ultimoSeg ? ultimoSeg.fecha : '';
+  cuentaMasReciente.proximoSeguimiento = ultimoSeg ? (ultimoSeg.proximaGestion || '') : '';
+  return cuentaMasReciente;
+}
 function estudiantesDeFamilia(codigoFamilia){
   const c = normCode(codigoFamilia);
   return DB.estudiantes.filter(e=>normCode(e.codigoFamilia)===c);
@@ -1016,7 +1079,7 @@ function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
     const m = Number(r.mesesAdeudados||0);
     if (m===3) rangos.r3++; else if (m>=4&&m<=5) rangos.r4_5++; else if (m>=6) rangos.r6++;
   });
-  const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && new Date(r.proximoSeguimiento) < new Date()));
+  const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && diasDesde(r.proximoSeguimiento) >= 0));
   const top10 = [...rows].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
   const actividadesPendientes = DB.estudianteActividades.filter(ea=>!ea.pagado).map(ea=>({...ea, _est: estudianteByCodigo(ea.codigoEstudiante)}));
   const montoActividadesPendientes = actividadesPendientes.reduce((s,a)=>s+Number(a.costo||0),0);
@@ -1357,8 +1420,8 @@ function openGestionModal(cuentaId, onDone, codigoEstudianteFallback){
       observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario
     };
     DB.seguimientos.push(seg);
-    if (c){ c.fechaUltimaGestion = seg.fecha; if (seg.proximaGestion) c.proximoSeguimiento = seg.proximaGestion; }
-    await saveSeguimientos(); if (c) await saveCuentas();
+    sincronizarResumenGestionEstudiante(codigoEstudiante);
+    await saveSeguimientos(); await saveCuentas();
     registrarAuditoria('Gestión registrada', `${codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
     closeModal(); if (onDone) onDone();
   };
@@ -1400,7 +1463,8 @@ function openEditarGestionModal(seguimientoId, onDone){
     seg.resultado = document.getElementById('gResultado').value;
     seg.proximaGestion = document.getElementById('gProxima').value;
     seg.observaciones = document.getElementById('gObs').value;
-    await saveSeguimientos();
+    sincronizarResumenGestionEstudiante(seg.codigoEstudiante);
+    await saveSeguimientos(); await saveCuentas();
     registrarAuditoria('Gestión editada', `${seg.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
     closeModal(); if (onDone) onDone();
   };
@@ -1413,7 +1477,8 @@ async function eliminarGestion(seguimientoId, onDone){
   if (!seg) return;
   if (!confirm(`¿Eliminar esta gestión del ${seg.fecha} (${seg.medio} · ${seg.resultado})? Esta acción no se puede deshacer.`)) return;
   DB.seguimientos = DB.seguimientos.filter(s=>s.id!==seguimientoId);
-  await saveSeguimientos([seguimientoId]);
+  sincronizarResumenGestionEstudiante(seg.codigoEstudiante);
+  await saveSeguimientos([seguimientoId]); await saveCuentas();
   registrarAuditoria('Gestión eliminada', `${seg.codigoEstudiante} · ${seg.fecha} · ${seg.medio} · ${seg.resultado}`);
   if (onDone) onDone();
 }

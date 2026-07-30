@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recursos humanos — COBROSCHOOL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F3F5F7;
+    --surface:#FFFFFF;
+    --ink:#1B2430;
+    --muted:#6B7785;
+    --navy:#16324F;
+    --accent1:#E8A33D;
+    --accent2:#E85D4B;
+    --border:#E4E8EC;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    font-family:'Inter', sans-serif;
+    color:var(--ink);
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:48px 40px;
+    max-width:420px;
+    text-align:center;
+    box-shadow:0 20px 40px -20px rgba(22,50,79,.15);
+  }
+  .icon{
+    width:64px;
+    height:64px;
+    border-radius:18px;
+    margin:0 auto 24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(135deg,var(--accent1),var(--accent2));
+  }
+  h1{
+    font-family:'Sora', sans-serif;
+    font-size:22px;
+    font-weight:700;
+    margin:0 0 8px;
+    color:var(--navy);
+  }
+  p{
+    font-size:14px;
+    color:var(--muted);
+    line-height:1.5;
+    margin:0 0 24px;
+  }
+  a.back{
+    display:inline-block;
+    font-size:13px;
+    font-weight:600;
+    color:var(--navy);
+    text-decoration:none;
+    padding:10px 18px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    transition:background .15s ease;
+  }
+  a.back:hover{ background:var(--bg); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" stroke="#fff" stroke-width="1.6" opacity="0.9"/>
+        <path d="M12 8v4.5l3 2" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>Recursos humanos</h1>
+    <p>Aquí podrás administrar personal, contratos y datos del equipo.<br>Todavía estamos construyendo esta app. Vuelve pronto.</p>
+    <a class="back" href="../index.html">← Volver al panel</a>
+  </div>
+</body>
+</html>

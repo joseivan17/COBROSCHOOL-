@@ -237,6 +237,7 @@ input:focus, select:focus, textarea:focus{outline:none;border-color:var(--accent
         <p id="pageSub">Panel general de cuentas críticas</p>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span class="small mono" style="color:var(--muted);" title="Versión de esta copia de la app — si acabas de subir un archivo nuevo y sigues viendo la versión vieja aquí, tu navegador o GitHub Pages todavía tienen la anterior en caché.">v${APP_VERSION}</span>
         <span id="storageBadge" class="storage-badge" title="Dónde se están guardando tus datos"></span>
         <div class="session-box">
           <span class="small">Sesión:</span>
@@ -711,6 +712,11 @@ const PERMS = {
   contable: { verDashboard:true, editarCuenta:true, eliminarRegistros:false, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
   auxiliar: { verDashboard:true, editarCuenta:false, eliminarRegistros:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
 };
+// Se actualiza cada vez que se entrega una nueva versión de este archivo. Si acabas de subir
+// un cambio y no ves esta fecha reflejada en la app (arriba a la derecha, o en la pantalla de
+// inicio de sesión), significa que tu navegador o GitHub Pages todavía están sirviendo la
+// versión anterior en caché — no que el cambio no se haya guardado.
+const APP_VERSION = '2026-07-30.2';
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
 
@@ -894,19 +900,22 @@ function actividadesPendientesDeEstudiante(codigoEstudiante){
 }
 // Todos los estudiantes que pertenecen a una misma familia (por Codigo_Familia) — para cuando
 // una familia tiene más de un hijo y se necesita ver la deuda de todos juntos, no uno a la vez.
-// La cuenta crítica más reciente de un estudiante guarda un resumen (fechaUltimaGestion,
-// proximoSeguimiento) para que el Dashboard no tenga que recorrer todos los seguimientos cada vez.
-// Este resumen se recalcula SIEMPRE desde los seguimientos reales — nunca se deja un valor viejo
-// a medias — para que crear, editar o eliminar una gestión se refleje de inmediato en el Dashboard.
+// Cada cuenta crítica (una por periodo) guarda un resumen (fechaUltimaGestion, proximoSeguimiento)
+// para que el Dashboard no tenga que recorrer todos los seguimientos cada vez. Una gestión no
+// pertenece a un periodo en particular — es sobre la familia/estudiante en general — así que este
+// resumen se aplica a TODOS los periodos de ese estudiante, no solo al más reciente. Si solo se
+// actualizara el periodo más reciente, un estudiante con deuda de varios meses seguiría apareciendo
+// "sin seguimiento" en los periodos anteriores aunque acabaras de darle seguimiento hoy.
 function sincronizarResumenGestionEstudiante(codigoEstudiante){
-  const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.periodo.localeCompare(a.periodo));
-  const cuentaMasReciente = cuentasEst[0];
-  if (!cuentaMasReciente) return null;
+  const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante);
+  if (!cuentasEst.length) return [];
   const segsEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const ultimoSeg = segsEst[0];
-  cuentaMasReciente.fechaUltimaGestion = ultimoSeg ? ultimoSeg.fecha : '';
-  cuentaMasReciente.proximoSeguimiento = ultimoSeg ? (ultimoSeg.proximaGestion || '') : '';
-  return cuentaMasReciente;
+  cuentasEst.forEach(c=>{
+    c.fechaUltimaGestion = ultimoSeg ? ultimoSeg.fecha : '';
+    c.proximoSeguimiento = ultimoSeg ? (ultimoSeg.proximaGestion || '') : '';
+  });
+  return cuentasEst;
 }
 function estudiantesDeFamilia(codigoFamilia){
   const c = normCode(codigoFamilia);
@@ -2780,6 +2789,7 @@ function renderLogin(){
         <div><div>Cuentas Críticas</div><div>Gestión de Cobros — Dirección</div></div>
       </div>
       ${inner}
+      <p class="small mono" style="text-align:center;color:var(--muted);margin-top:18px;">v${APP_VERSION}</p>
     </div>`;
 
   /* ---------- Asistente de primer uso: crear el Administrador real ---------- */

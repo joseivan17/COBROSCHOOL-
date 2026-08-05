@@ -716,7 +716,7 @@ const PERMS = {
 // un cambio y no ves esta fecha reflejada en la app (arriba a la derecha, o en la pantalla de
 // inicio de sesión), significa que tu navegador o GitHub Pages todavía están sirviendo la
 // versión anterior en caché — no que el cambio no se haya guardado.
-const APP_VERSION = '2026-07-30.3';
+const APP_VERSION = '2026-07-30.5';
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
 
@@ -878,6 +878,50 @@ function esMesFueraDeCiclo(periodo){
   if (!periodo || !/^\d{4}-\d{2}$/.test(periodo)) return false;
   const mes = periodo.split('-')[1];
   return !MESES_CICLO_ESCOLAR.includes(mes);
+}
+// Calcula el periodo (AAAA-MM) que sigue a otro, saltando agosto (fuera del ciclo escolar).
+function siguientePeriodo(periodo){
+  const [y, m] = periodo.split('-').map(Number);
+  let nuevoAnio = y, nuevoMes = m + 1;
+  if (nuevoMes === 8) nuevoMes = 9; // saltar agosto
+  if (nuevoMes > 12){ nuevoMes = 1; nuevoAnio++; }
+  return `${nuevoAnio}-${String(nuevoMes).padStart(2,'0')}`;
+}
+// Genera automáticamente el periodo siguiente a partir de las cuentas TODAVÍA activas
+// (no regularizadas) de un periodo — les suma un mes de mora, traslada el balance pendiente
+// como nuevo balance del mes, y conserva el responsable asignado. No duplica: si un estudiante
+// ya tiene un registro en el periodo destino, se omite (para poder correrlo más de una vez sin miedo).
+async function generarPeriodoSiguiente(periodoOrigen){
+  if (!perm('editarCuenta')){ alert('Su rol no tiene permiso para generar un nuevo periodo.'); return null; }
+  const origen = DB.cuentas.filter(c=>c.periodo===periodoOrigen && c.estado!=='Regularizado');
+  if (!origen.length){ alert('No hay cuentas activas (sin regularizar) en este periodo para trasladar al mes siguiente.'); return null; }
+  const nuevoPeriodo = siguientePeriodo(periodoOrigen);
+  const existentes = new Set(DB.cuentas.filter(c=>c.periodo===nuevoPeriodo).map(c=>normCode(c.codigoEstudiante)));
+  const resumen = `Esto creará el periodo ${nuevoPeriodo} a partir de las ${origen.length} cuenta(s) activa(s) de ${periodoOrigen}:\n` +
+    `• Meses adeudados: +1 respecto al mes actual\n• Balance: se traslada el balance pendiente (ya descontando abonos)\n` +
+    `• Estado: vuelve a "Pendiente", responsable y observaciones se conservan\n\n` +
+    `Los estudiantes que ya tengan un registro en ${nuevoPeriodo} se omiten (no se duplican).\n\n¿Continuar?`;
+  if (!confirm(resumen)) return null;
+  let creadas = 0, omitidas = 0;
+  origen.forEach(c=>{
+    if (existentes.has(normCode(c.codigoEstudiante))){ omitidas++; return; }
+    const pendiente = balancePendiente(c);
+    DB.cuentas.push({
+      id: cuid(), codigoEstudiante: c.codigoEstudiante, periodo: nuevoPeriodo,
+      mesesAdeudados: Number(c.mesesAdeudados||0) + 1,
+      balanceAnioAnterior: 0, balance: pendiente,
+      fechaUltimoPago: c.fechaUltimoPago||'', montoUltimoPago: '',
+      estado: 'Pendiente', responsable: c.responsable||'',
+      fechaUltimaGestion: c.fechaUltimaGestion||'', proximoSeguimiento: c.proximoSeguimiento||'',
+      observaciones: c.observaciones||'',
+      nombreEstudianteImportado: c.nombreEstudianteImportado||'', nombreFamiliaImportado: c.nombreFamiliaImportado||'', codigoFamiliaImportado: c.codigoFamiliaImportado||''
+    });
+    creadas++;
+  });
+  await saveCuentas();
+  registrarAuditoria('Periodo generado automáticamente', `${periodoOrigen} → ${nuevoPeriodo}: ${creadas} creada(s), ${omitidas} omitida(s) (ya existían)`);
+  alert(`Periodo ${nuevoPeriodo} generado: ${creadas} cuenta(s) nueva(s)${omitidas?`, ${omitidas} omitida(s) porque ya existían`:''}.`);
+  return { nuevoPeriodo, creadas, omitidas };
 }
 function abonosDeCuenta(cuentaId){
   return DB.abonos.filter(a=>a.cuentaId===cuentaId).sort((a,b)=>a.fecha.localeCompare(b.fecha));
@@ -1085,15 +1129,22 @@ function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
     const codsConActividad = new Set(DB.estudianteActividades.filter(ea=>ea.actividad===actividadFiltro && ea.estado==='Activa').map(ea=>ea.codigoEstudiante));
     rows = rows.filter(r=>codsConActividad.has(r.codigoEstudiante));
   }
-  const familiasSet = new Set(rows.map(r=> r._est ? r._est.codigoFamilia : null).filter(Boolean));
-  const balanceTotal = rows.filter(r=>r.estado!=='Regularizado').reduce((s,r)=>s+balancePendiente(r),0);
+  // A partir de aquí, todas las métricas de "cuentas críticas" (familias, balance, distribución
+  // de mora, sin seguimiento, top 10) usan solo las cuentas TODAVÍA activas — una vez regularizada,
+  // ya no debe seguir sumando en ninguna de estas tarjetas, aunque el registro histórico persista.
+  const rowsActivas = rows.filter(r=>r.estado!=='Regularizado');
+  // Solo cuentan las familias que TODAVÍA tienen una cuenta crítica activa — una vez que se
+  // regulariza (balance en $0, o marcada a mano), ya no es una "cuenta crítica" pendiente,
+  // así que no debe seguir sumando aquí aunque el registro histórico del periodo siga existiendo.
+  const familiasSet = new Set(rowsActivas.map(r=> r._est ? r._est.codigoFamilia : null).filter(Boolean));
+  const balanceTotal = rowsActivas.reduce((s,r)=>s+balancePendiente(r),0);
   const rangos = {r3:0,r4_5:0,r6:0};
-  rows.forEach(r=>{
+  rowsActivas.forEach(r=>{
     const m = Number(r.mesesAdeudados||0);
     if (m===3) rangos.r3++; else if (m>=4&&m<=5) rangos.r4_5++; else if (m>=6) rangos.r6++;
   });
-  const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && diasDesde(r.proximoSeguimiento) >= 0));
-  const top10 = [...rows].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
+  const sinSeguimiento = rowsActivas.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && diasDesde(r.proximoSeguimiento) >= 0));
+  const top10 = [...rowsActivas].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
   const actividadesPendientes = DB.estudianteActividades.filter(ea=>!ea.pagado).map(ea=>({...ea, _est: estudianteByCodigo(ea.codigoEstudiante)}));
   const montoActividadesPendientes = actividadesPendientes.reduce((s,a)=>s+Number(a.costo||0),0);
 
@@ -1179,6 +1230,7 @@ function renderReporte(root){
       <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:normal;padding:7px 0;"><input type="checkbox" id="rMostrarPagadas"> Mostrar cuentas ya saldadas/regularizadas</label></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="rExport" title="Genera un Excel con el mismo formato que la plantilla de importación, listo para editar y volver a subir">⭳ Exportar (reimportable)</button></div>
       ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
+      ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn" id="rGenerarSiguiente" title="Crea el periodo del mes siguiente a partir de las cuentas todavía activas de este periodo">→ Generar periodo siguiente</button></div>`:''}
     </div>
     <div class="tablewrap">
       <table>
@@ -1296,6 +1348,15 @@ function renderReporte(root){
   ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango','rMostrarPagadas'].forEach(id=> document.getElementById(id).onchange = draw);
   const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
   if (nuevaCuentaBtn) nuevaCuentaBtn.onclick = ()=> openCuentaModal(null, document.getElementById('rPeriodo').value, ()=>{ renderReporte(root); });
+  const generarSiguienteBtn = document.getElementById('rGenerarSiguiente');
+  if (generarSiguienteBtn) generarSiguienteBtn.onclick = async ()=>{
+    const resultado = await generarPeriodoSiguiente(document.getElementById('rPeriodo').value);
+    if (resultado){
+      renderReporte(root);
+      // Selecciona automáticamente el periodo recién creado para que se vea de inmediato
+      setTimeout(()=>{ const sel = document.getElementById('rPeriodo'); if (sel){ sel.value = resultado.nuevoPeriodo; sel.dispatchEvent(new Event('change')); } }, 0);
+    }
+  };
   if (periodos.length) draw(); else document.getElementById('rBody').innerHTML = `<tr><td colspan="20" class="empty">Aún no hay datos importados.</td></tr>`;
 }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Panel Ejecutivo — Happy Learning School</title>
+<title>Gestión de Proyectos HLS — Happy Learning School</title>
 <style>
   :root {
     color-scheme: light;
@@ -278,10 +278,7 @@
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
 
-  /* ---------- Ver como / usuarios / modal / mis tareas ---------- */
-  .viewas-box { margin-bottom: 10px; }
-  .viewas-box label { font-size: 10.5px; color: var(--text-muted); display:block; margin-bottom: 4px; }
-  .viewas-box select { width: 100%; }
+  /* ---------- usuarios / modal / mis tareas ---------- */
   .role-banner { font-size: 11.5px; color: var(--text-muted); padding: 8px 10px; background: var(--border); border-radius: 8px; margin-bottom: 12px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
   .modal-panel { background: var(--surface-1); border-radius: 14px; max-width: 560px; width: 100%; max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow); border: 1px solid var(--border); }
@@ -298,6 +295,32 @@
   .attachment-chip a { flex: 1; text-decoration: none; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .attachment-chip .remove { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 13px; flex-shrink:0; }
   .att-pdf { color: var(--critical); } .att-word { color: #2a78d6; } .att-excel { color: var(--good); } .att-ppt { color: #eb6834; } .att-image { color: #4a3aa7; } .att-link { color: var(--text-muted); }
+
+  /* ---------- Personas asignadas (multi-responsable) ---------- */
+  .assignee-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .assignee-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 12px; }
+  .assignee-chip .avatar { width: 20px; height: 20px; border-radius: 50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9.5px; font-weight:700; flex-shrink:0; }
+  .assignee-chip .name { white-space: nowrap; }
+  .assignee-chip .deliver-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: var(--status-bg-warning); color: var(--warning); white-space: nowrap; }
+  .assignee-chip .deliver-badge.completado { background: var(--status-bg-good); color: var(--good-text); }
+  .assignee-chip .unassign { border:none; background:none; color: var(--text-muted); cursor:pointer; padding:0; display:flex; }
+  .assignee-picker { border: 1px solid var(--border-strong); }
+
+  /* ---------- Selección múltiple y barra de acciones en bloque ---------- */
+  .row-select-cell { width: 30px; text-align:center; }
+  .bulk-toolbar {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 22px; z-index: 60;
+    background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 8px 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    max-width: calc(100vw - 40px);
+  }
+  .bulk-toolbar .count { font-size: 12.5px; font-weight: 700; padding: 0 8px 0 4px; white-space: nowrap; }
+  .bulk-toolbar .btn { padding: 7px 11px; font-size: 12.5px; }
+  .bulk-menu-panel {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 74px; z-index: 61;
+    background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 12px; min-width: 260px; max-width: calc(100vw - 40px);
+  }
   .attach-form { display: flex; gap: 8px; margin-bottom: 8px; }
   .attach-form input[type=text] { flex: 1; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-primary); font-size: 12px; }
   .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
@@ -619,16 +642,17 @@ function icon(name, opts){
    DATOS DE EJEMPLO
    ========================================================= */
 const DEPARTMENTS = [
-  { id:'planta-fisica', name:'Planta Física y Mantenimiento', coord:'Miguel Torres', color:'#2a78d6', colorDark:'#3987e5', icon:'wrench' },
-  { id:'nivel-inicial', name:'Coordinación Nivel Inicial', coord:'Ana Gómez', color:'#008300', colorDark:'#1cb51c', icon:'blocks' },
-  { id:'nivel-primario', name:'Coordinación Nivel Primario', coord:'Laura Fernández', color:'#e87ba4', colorDark:'#d55181', icon:'book' },
-  { id:'nivel-secundario', name:'Coordinación Nivel Secundario', coord:'Carlos Medina', color:'#c98500', colorDark:'#eda100', icon:'cap' },
-  { id:'contabilidad', name:'Departamento de Contabilidad', coord:'Patricia Rojas', color:'#1baf7a', colorDark:'#3ecf98', icon:'coins' },
-  { id:'rrhh', name:'Recursos Humanos', coord:'Diego Salas', color:'#eb6834', colorDark:'#f08055', icon:'briefcase' },
-  { id:'bienestar', name:'Bienestar Estudiantil', coord:'Marcela Vidal', color:'#4a3aa7', colorDark:'#9085e9', icon:'heart' },
-  { id:'secretaria', name:'Secretaría Docente', coord:'Rosa Delgado', color:'#e34948', colorDark:'#e66767', icon:'folder' },
-  { id:'tic', name:'Departamento de Tecnología (TIC)', coord:'Jorge Peña', color:'#0f8a8a', colorDark:'#2fb3b3', icon:'monitor' },
-  { id:'psicologia', name:'Psicología Escolar', coord:'Valeria Suárez', color:'#8a5a3c', colorDark:'#c08a5f', icon:'brain', confidential:true },
+  { id:'planta-fisica', name:'Planta Física y Mantenimiento', coord:null, color:'#2a78d6', colorDark:'#3987e5', icon:'wrench' },
+  { id:'nivel-inicial', name:'Coordinación Nivel Inicial', coord:null, color:'#008300', colorDark:'#1cb51c', icon:'blocks' },
+  { id:'nivel-primario', name:'Coordinación Nivel Primario', coord:null, color:'#e87ba4', colorDark:'#d55181', icon:'book' },
+  { id:'nivel-secundario', name:'Coordinación Nivel Secundario', coord:null, color:'#c98500', colorDark:'#eda100', icon:'cap' },
+  { id:'contabilidad', name:'Departamento de Contabilidad', coord:null, color:'#1baf7a', colorDark:'#3ecf98', icon:'coins' },
+  { id:'rrhh', name:'Recursos Humanos', coord:null, color:'#eb6834', colorDark:'#f08055', icon:'briefcase' },
+  { id:'bienestar', name:'Bienestar Estudiantil', coord:null, color:'#4a3aa7', colorDark:'#9085e9', icon:'heart' },
+  { id:'secretaria', name:'Secretaría Docente', coord:null, color:'#e34948', colorDark:'#e66767', icon:'folder' },
+  { id:'tic', name:'Departamento de Tecnología (TIC)', coord:null, color:'#0f8a8a', colorDark:'#2fb3b3', icon:'monitor' },
+  { id:'psicologia', name:'Psicología Escolar', coord:null, color:'#8a5a3c', colorDark:'#c08a5f', icon:'brain', confidential:true },
+  { id:'coordinacion', name:'Departamento de Coordinación', coord:null, color:'#5b3fa8', colorDark:'#9d84e8', icon:'clipboard' },
 ];
 
 // offset = días relativos a HOY (negativo = vencido, positivo = próximo)
@@ -701,11 +725,18 @@ const RAW_TASKS = [
   ['psicologia','Derivación a especialista externo','media','completado',-6,'Valeria Suárez'],
   ['psicologia','Taller de habilidades socioemocionales','baja','revision',9,'Nicolás Farfán'],
   ['psicologia','Actualización de protocolos de intervención','baja','completado',-9,'Valeria Suárez'],
+  // Departamento de Coordinación
+  ['coordinacion','Consolidado de indicadores institucionales — julio','alta','progreso',4,'Ivelisse Peralta',null,['Isabel Alcántara']],
+  ['coordinacion','Revisión cruzada de checklists departamentales','media','pendiente',9,'Ivelisse Peralta',null,['Isabel Alcántara']],
+  ['coordinacion','Plantilla de seguimiento de proyectos — 3er trimestre','media','revision',6,'Isabel Alcántara'],
+  ['coordinacion','Acta de reunión de coordinadores generales','baja','completado',-5,'Ivelisse Peralta'],
+  ['coordinacion','Auditoría interna de cumplimiento de tareas','alta','atrasado',-2,'Ivelisse Peralta',null,['Isabel Alcántara']],
 ];
 
 const TASKS = RAW_TASKS.map(r => ({
   id: 't' + (_id++),
-  deptId: r[0], title: r[1], priority: r[2], status: r[3], dueOffset: r[4], dueDateFixed: null, resp: r[5], cargo: r[6] || null, assignedBy: null
+  deptId: r[0], title: r[1], priority: r[2], status: r[3], dueOffset: r[4], dueDateFixed: null, resp: r[5], cargo: r[6] || null, assignedBy: null,
+  _coAssignees: r[7] || [], // nombres de responsables adicionales (además de "resp") — solo para poblar assignees[] al cargar
 }));
 let _taskIdCounter = TASKS.length + 1;
 function newTaskId(){ return 't' + (_taskIdCounter++); }
@@ -749,6 +780,10 @@ const CHECKLISTS = {
     {t:'Entrevista inicial', done:true},{t:'Aplicación de pruebas', done:true},
     {t:'Informe psicológico', done:false},{t:'Devolución a familia', done:false},
     {t:'Plan de seguimiento', done:false} ]},
+  'coordinacion': { title:'Checklist de coordinación general', items:[
+    {t:'Consolidar reportes de todos los departamentos', done:true},{t:'Revisar plantillas de proyectos vigentes', done:false},
+    {t:'Actualizar tablero de indicadores institucionales', done:false},{t:'Reunión mensual de coordinadores', done:true},
+    {t:'Auditoría de tareas atrasadas por departamento', done:false} ]},
 };
 
 const DOMAIN = '@happylearningschool.net';
@@ -780,8 +815,37 @@ const RAW_USERS = [
   ['u21','Bruno Salinas','bruno.salinas'+DOMAIN,'tic','colaborador',null,'invitado'],
   ['u22','Valeria Suárez','valeria.suarez'+DOMAIN,'psicologia','coordinador',null,'activo'],
   ['u23','Nicolás Farfán','nicolas.farfan'+DOMAIN,'psicologia','colaborador',null,'invitado'],
+  ['u24','Ivelisse Peralta','ivelisse.peralta'+DOMAIN,'coordinacion','coordinador',null,'activo'],
+  ['u25','Isabel Alcántara','isabel.alcantara'+DOMAIN,'coordinacion','colaborador',null,'activo'],
 ];
 const USERS = RAW_USERS.map(r => ({ id:r[0], name:r[1], email:r[2], deptId:r[3], role:r[4], cargo:r[5], status:r[6], lastReviewOffset:null }));
+
+/* =========================================================
+   RESPONSABLES MÚLTIPLES POR TAREA (con entrega individual)
+   ---------------------------------------------------------
+   Cada tarea guarda "resp"/"cargo" (responsable principal, tal como antes,
+   para no romper ninguna vista que ya lo usaba), y además un arreglo
+   "assignees" con TODAS las personas asignadas. Cada persona en ese arreglo
+   tiene su propio "status" de entrega ('pendiente' | 'completado'),
+   independiente del estado general de la tarea — así cada quien puede
+   marcar su parte como entregada sin afectar a los demás asignados.
+   ========================================================= */
+function findUserByName(name){ return USERS.find(u=>u.name===name) || null; }
+TASKS.forEach(t=>{
+  const names = [t.resp, ...(t._coAssignees||[])].filter(Boolean);
+  const seen = new Set();
+  t.assignees = names.filter(n=>{ if (seen.has(n)) return false; seen.add(n); return true; }).map(name=>{
+    const u = findUserByName(name);
+    return {
+      userId: u ? u.id : null,
+      name,
+      cargo: (name===t.resp ? t.cargo : (u ? u.cargo : null)) || null,
+      status: t.status==='completado' ? 'completado' : 'pendiente',
+    };
+  });
+  delete t._coAssignees;
+  t.notify = false; // "Enviar notificaciones" — informativo, se guarda por tarea
+});
 
 const AUDIT_LOG = [
   { offset:-12, actor:'Patricia Falcón', action:'revisó el perfil de', target:'Ricardo Núñez' },
@@ -872,16 +936,25 @@ const state = {
   authed: false,
   loginError: null,
   loginBusy: false,
-  loginMode: 'signin', // 'signin' | 'signup'
+  loginMode: 'signin', // 'signin' | 'signup' | 'reset'
   loginNotice: null,
   signupNameValue: '',
-  realSession: false, // true cuando el login fue verificado de verdad contra Supabase Auth (no una simulación de "Ver como")
+  realSession: false, // true cuando el login fue verificado de verdad contra Supabase Auth
+  recoveryMode: false, // true cuando la página se abrió desde el enlace de "restablecer contraseña" del correo
+  recoveryBusy: false,
+  recoveryError: null,
   remote: {
     users: null, invites: null, auditLog: null, loading: false, error: null, savingId: null,
     createMode: 'create', createBusy: false, createError: null, createBanner: null,
     editUserId: null, editError: null, deleteConfirmId: null,
   },
   supabase: { url:'https://jfhwruqureeqdkcgbizr.supabase.co', anonKey:'sb_publishable_3T7XuZL58jusli75ZMgKhg_GWMaqjA0', status:null, message:'' }, // status: null | 'checking' | 'ok' | 'error' — memoria de sesión únicamente
+  selectedTaskIds: new Set(),   // selección múltiple en la vista de lista (reasignar/borrar/mover en bloque)
+  bulkMenuOpen: null,           // null | 'status' | 'assignees' | 'dates' | 'more'
+  bulkDateValue: '',
+  assigneeUI: { open:false, mode:null, taskId:null, search:'', checked:new Set(), notify:false }, // panel de "Personas asignadas" (tarea individual o en bloque)
+  templateError: null,
+  templateBanner: null,
 };
 
 function today(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
@@ -907,6 +980,202 @@ function assignableUsers(deptId){
   const seen = new Set();
   return [...usersInDept(deptId), ...leadershipUsers()].filter(u=>{ if (seen.has(u.id) || u.status==='inactivo') return false; seen.add(u.id); return true; });
 }
+
+/* =========================================================
+   RESPONSABLES MÚLTIPLES — helpers de lectura/escritura
+   ========================================================= */
+function taskAssigneeList(t){
+  if (t.assignees && t.assignees.length) return t.assignees;
+  if (!t.resp || t.resp==='—') return [];
+  return [{ userId: t._respUserId || null, name: t.resp, cargo: t.cargo || null, status: t.status==='completado' ? 'completado' : 'pendiente' }];
+}
+function taskAssigneeSummary(t){
+  const list = taskAssigneeList(t);
+  if (list.length===0) return '—';
+  if (list.length===1) return list[0].name + (list[0].cargo ? ` (${list[0].cargo})` : '');
+  return `${list[0].name} +${list.length-1}`;
+}
+function myAssigneeEntry(t){
+  const u = currentUser();
+  return taskAssigneeList(t).find(a => (a.userId && a.userId===u.id) || a.name===u.name) || null;
+}
+function isTaskMine(t){ return !!myAssigneeEntry(t); }
+function canToggleAssigneeDelivery(t, userIdOrName){
+  const u = currentUser();
+  if (isLeadership()) return true;
+  if (u.deptId && u.deptId===t.deptId && u.role==='coordinador') return true;
+  return (u.id===userIdOrName) || (u.name===userIdOrName);
+}
+// "Asignar con IA": sugerencia automática de balanceo de carga — NO es una llamada a un
+// modelo de lenguaje externo; simplemente prioriza a quien tiene menos tareas abiertas
+// en el departamento. Se etiqueta así en la interfaz para no generar expectativas falsas.
+function suggestAssigneesAI(deptId, priority){
+  const pool = assignableUsers(deptId).filter(u=>u.role==='coordinador' || u.role==='colaborador');
+  const candidates = pool.length ? pool : assignableUsers(deptId);
+  const withLoad = candidates.map(u=>{
+    const open = TASKS.filter(t => t.deptId===deptId && t.status!=='completado' && taskAssigneeList(t).some(a=>a.userId===u.id)).length;
+    return { u, open };
+  }).sort((a,b)=>a.open-b.open);
+  const n = priority==='alta' ? Math.min(2, withLoad.length) : Math.min(1, withLoad.length);
+  return withLoad.slice(0,n).map(x=>x.u.id);
+}
+async function applyAssigneesToTask(task, newUserIds){
+  const oldIds = new Set(taskAssigneeList(task).map(a=>a.userId).filter(Boolean));
+  const newIds = [...new Set(newUserIds)];
+  const newIdSet = new Set(newIds);
+  if (isRealSession()){
+    const client = getSupabaseClient();
+    const toRemove = [...oldIds].filter(id=>!newIdSet.has(id));
+    const toAdd = newIds.filter(id=>!oldIds.has(id));
+    try {
+      if (toRemove.length) { const { error } = await client.from('task_assignees').delete().eq('task_id', task.id).in('user_id', toRemove); if (error) throw error; }
+      if (toAdd.length) { const { error } = await client.from('task_assignees').insert(toAdd.map(uid=>({ task_id: task.id, user_id: uid }))); if (error) throw error; }
+      if (newIds.length) { await client.from('tasks').update({ resp_user_id: newIds[0], updated_at: new Date().toISOString() }).eq('id', task.id); }
+    } catch (err) { state.taskError = friendlySupabaseError(err); render(); return false; }
+  }
+  const prevList = taskAssigneeList(task);
+  task.assignees = newIds.map(uid=>{
+    const existing = prevList.find(a=>a.userId===uid);
+    const u = USERS.find(x=>x.id===uid);
+    return { userId: uid, name: u ? u.name : '—', cargo: u ? (u.cargo||null) : null, status: existing ? existing.status : 'pendiente' };
+  });
+  if (task.assignees.length){ task.resp = task.assignees[0].name; task.cargo = task.assignees[0].cargo; task._respUserId = task.assignees[0].userId; }
+  else { task.resp = '—'; task.cargo = null; task._respUserId = null; }
+  return true;
+}
+async function setAssigneeStatus(task, userId, newStatus){
+  const list = taskAssigneeList(task);
+  if (!task.assignees || !task.assignees.length) task.assignees = list;
+  const a = task.assignees.find(x => (x.userId && x.userId===userId) || (!x.userId && x.name===userId));
+  if (!a) return;
+  if (isRealSession() && a.userId){
+    const client = getSupabaseClient();
+    try {
+      const { error } = await client.from('task_assignees').update({ status: newStatus, completed_at: newStatus==='completado' ? new Date().toISOString() : null }).eq('task_id', task.id).eq('user_id', a.userId);
+      if (error) throw error;
+    } catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+  }
+  a.status = newStatus;
+  render();
+}
+async function applyBulkAssignees(taskIds, userIds){
+  for (const id of taskIds){
+    const task = TASKS.find(t=>t.id===id);
+    if (task) await applyAssigneesToTask(task, userIds);
+  }
+  render();
+}
+async function applyBulkStatus(taskIds, newStatus){
+  for (const id of taskIds){
+    const task = TASKS.find(t=>t.id===id); if (!task) continue;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try { const { error } = await client.from('tasks').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', id); if (error) throw error; }
+      catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+    }
+    task.status = newStatus;
+  }
+  render();
+}
+async function applyBulkDueDate(taskIds, newDate){
+  for (const id of taskIds){
+    const task = TASKS.find(t=>t.id===id); if (!task) continue;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try { const { error } = await client.from('tasks').update({ due_date: newDate, updated_at: new Date().toISOString() }).eq('id', id); if (error) throw error; }
+      catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+    }
+    task.dueDateFixed = newDate;
+  }
+  render();
+}
+async function applyBulkPriority(taskIds, newPriority){
+  for (const id of taskIds){
+    const task = TASKS.find(t=>t.id===id); if (!task) continue;
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try { const { error } = await client.from('tasks').update({ priority: newPriority, updated_at: new Date().toISOString() }).eq('id', id); if (error) throw error; }
+      catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+    }
+    task.priority = newPriority;
+  }
+  render();
+}
+async function deleteBulkTasks(taskIds){
+  for (const id of taskIds){
+    if (isRealSession()){
+      const client = getSupabaseClient();
+      try { const { error } = await client.from('tasks').delete().eq('id', id); if (error) throw error; }
+      catch (err) { state.taskError = friendlySupabaseError(err); render(); return; }
+    }
+    const idx = TASKS.findIndex(t=>t.id===id);
+    if (idx>-1) TASKS.splice(idx,1);
+    delete TASK_ATTACHMENTS[id]; delete TASK_NOTES[id];
+  }
+  state.selectedTaskIds = new Set();
+  render();
+}
+function renderAssigneePicker(deptId, priority){
+  const ui = state.assigneeUI;
+  const pool = assignableUsers(deptId);
+  const q = (ui.search||'').toLowerCase();
+  const filtered = pool.filter(u=> !q || u.name.toLowerCase().includes(q));
+  return `<div class="assignee-picker panel" style="margin-top:8px;padding:10px;" data-stop="1">
+    <input type="text" id="assignee-search-input" placeholder="Buscar persona…" value="${(ui.search||'').replace(/"/g,'&quot;')}" data-action="assignee-picker-search" style="width:100%;margin-bottom:8px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font-size:12.5px;">
+    <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin-bottom:8px;">
+      ${filtered.map(u=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 2px;cursor:pointer;">
+        <input type="checkbox" data-action="assignee-picker-toggle" data-userid="${u.id}" ${ui.checked.has(u.id)?'checked':''}>
+        <span>${u.name}${u.cargo?` (${u.cargo})`:''} — ${ROLE_LABELS[u.role]}</span>
+      </label>`).join('')}
+      ${filtered.length===0 ? '<div class="form-hint">Sin resultados.</div>' : ''}
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+      <button type="button" class="btn" data-action="assignee-picker-clear">${icon('x',{size:12})} Desasignar todos</button>
+      <button type="button" class="btn" data-action="assignee-picker-ai" data-priority="${priority||'media'}">${icon('checkCircle',{size:12})} Asignar con IA</button>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-muted);margin-left:auto;white-space:nowrap;">
+        <input type="checkbox" data-action="assignee-picker-notify" ${ui.notify?'checked':''}> Enviar notificaciones
+      </label>
+    </div>
+    <div class="form-hint" style="margin:0 0 8px;">"Asignar con IA" es una sugerencia automática que balancea la carga de tareas abiertas entre el equipo del departamento — todavía no envía la tarea a un modelo de lenguaje externo. "Enviar notificaciones" queda guardado como preferencia de la tarea; el envío real de correos es un desarrollo aparte, no incluido todavía.</div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn primary" data-action="assignee-picker-apply">${icon('check',{size:13})} ${ui.mode==='bulk' ? 'Aplicar a seleccionadas' : 'Guardar asignados'}</button>
+      <button type="button" class="btn" data-action="assignee-picker-cancel">Cancelar</button>
+    </div>
+  </div>`;
+}
+function closeAssigneePicker(){
+  state.assigneeUI = { open:false, mode:null, taskId:null, search:'', checked:new Set(), notify:false };
+}
+
+/* =========================================================
+   PLANTILLAS DE TAREAS — importar / exportar (JSON)
+   ========================================================= */
+function buildTemplateFromTasks(deptId, taskList){
+  const d = dept(deptId);
+  return {
+    version: 1,
+    deptId,
+    deptName: d ? d.name : deptId,
+    exportedAt: toISODate(today()),
+    tasks: taskList.map(t=>({
+      title: t.title,
+      priority: t.priority,
+      status: t.status,
+      dueOffsetDays: Math.round((dueDate(t) - today()) / (24*60*60*1000)),
+      assignees: taskAssigneeList(t).map(a=>({ name: a.name, cargo: a.cargo || null })),
+      note: (TASK_NOTES[t.id]||[])[0] ? TASK_NOTES[t.id][0].text : '',
+    })),
+  };
+}
+function downloadJSON(obj, filename){
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+
 function showFormError(form, msg){
   let e = form.querySelector('.inline-form-error');
   if (!e){
@@ -978,19 +1247,25 @@ function render(){
    RENDER: LOGIN
    ========================================================= */
 function renderLogin(){
+  if (state.recoveryMode) return renderPasswordRecoveryScreen();
   const mode = state.loginMode || 'signin';
   const isSignup = mode === 'signup';
+  const isReset = mode === 'reset';
+  const heading = isSignup ? 'Crear cuenta' : isReset ? 'Restablecer contraseña' : 'Iniciar sesión';
+  const subheading = isSignup ? `Usa exactamente el correo institucional con el que Dirección te invitó`
+    : isReset ? `Escribe tu correo institucional y te enviaremos un enlace para restablecer tu contraseña`
+    : `Ingresa con tu correo institucional ${DOMAIN} y tu contraseña`;
   return `<div class="login-screen">
     <div class="login-card">
       <div class="brand" style="justify-content:center;margin-bottom:18px;">
         <div class="brand-mark">HL</div>
         <div class="brand-text">
           <div class="name">Happy Learning School</div>
-          <div class="sub">Panel Ejecutivo</div>
+          <div class="sub">Gestión de Proyectos HLS</div>
         </div>
       </div>
-      <h2 style="text-align:center;font-size:16px;margin:0 0 4px;">${isSignup ? 'Crear cuenta' : 'Iniciar sesión'}</h2>
-      <p style="text-align:center;color:var(--text-muted);font-size:12.5px;margin:0 0 18px;">${isSignup ? `Usa exactamente el correo institucional con el que Dirección te invitó` : `Ingresa con tu correo institucional ${DOMAIN} y tu contraseña`}</p>
+      <h2 style="text-align:center;font-size:16px;margin:0 0 4px;">${heading}</h2>
+      <p style="text-align:center;color:var(--text-muted);font-size:12.5px;margin:0 0 18px;">${subheading}</p>
       ${state.loginError ? `<div class="invite-error" style="margin-bottom:12px;">${icon('alertTriangle',{size:14})} ${state.loginError}</div>` : ''}
       ${state.loginNotice ? `<div class="invite-link-banner" style="margin-bottom:12px;">${icon('checkCircle',{size:14})} ${state.loginNotice}</div>` : ''}
       ${!getSupabaseClient() ? `<div class="invite-error" style="margin-bottom:12px;">${icon('alertTriangle',{size:14})} No hay una conexión a Supabase configurada en este archivo — no es posible iniciar sesión. Contacta a Dirección General.</div>` : ''}
@@ -1016,15 +1291,28 @@ function renderLogin(){
       </form>
       <div class="form-hint" style="margin-top:14px;text-align:center;">
         <a href="#" data-action="login-toggle-mode" style="color:var(--accent);">Ya tengo cuenta — iniciar sesión</a>
+      </div>` : isReset ? `
+      <form data-action="reset-password-request">
+        <div class="field" style="margin-bottom:14px;">
+          <label>Correo institucional</label>
+          <input type="email" name="email" placeholder="nombre.apellido${DOMAIN}" value="${state.loginEmailValue||''}" autofocus ${state.loginBusy?'disabled':''}>
+        </div>
+        <button type="submit" class="btn primary" style="width:100%;justify-content:center;" ${state.loginBusy?'disabled':''}>${icon('mail',{size:14})} ${state.loginBusy?'Enviando…':'Enviar enlace de restablecimiento'}</button>
+      </form>
+      <div class="form-hint" style="margin-top:14px;text-align:center;">
+        <a href="#" data-action="login-back-to-signin" style="color:var(--accent);">Volver a iniciar sesión</a>
       </div>` : `
       <form data-action="login-submit">
         <div class="field" style="margin-bottom:12px;">
           <label>Correo institucional</label>
           <input type="email" name="email" placeholder="nombre.apellido${DOMAIN}" value="${state.loginEmailValue||''}" autofocus ${state.loginBusy?'disabled':''}>
         </div>
-        <div class="field" style="margin-bottom:14px;">
+        <div class="field" style="margin-bottom:8px;">
           <label>Contraseña</label>
           <input type="password" name="password" placeholder="••••••••" ${state.loginBusy?'disabled':''}>
+        </div>
+        <div style="text-align:right;margin-bottom:14px;">
+          <a href="#" data-action="login-forgot-password" style="color:var(--accent);font-size:11.5px;">¿Olvidaste tu contraseña?</a>
         </div>
         <button type="submit" class="btn primary" style="width:100%;justify-content:center;" ${state.loginBusy?'disabled':''}>${icon('login',{size:15})} ${state.loginBusy?'Ingresando…':'Ingresar'}</button>
       </form>
@@ -1034,6 +1322,33 @@ function renderLogin(){
       <div class="form-hint" style="margin-top:16px;text-align:center;">
         Inicio de sesión real con Supabase Authentication. La sesión no se guarda entre recargas de la página por diseño — cada vez que abras el panel deberás ingresar de nuevo.
       </div>
+    </div>
+  </div>`;
+}
+function renderPasswordRecoveryScreen(){
+  return `<div class="login-screen">
+    <div class="login-card">
+      <div class="brand" style="justify-content:center;margin-bottom:18px;">
+        <div class="brand-mark">HL</div>
+        <div class="brand-text">
+          <div class="name">Happy Learning School</div>
+          <div class="sub">Gestión de Proyectos HLS</div>
+        </div>
+      </div>
+      <h2 style="text-align:center;font-size:16px;margin:0 0 4px;">Restablecer contraseña</h2>
+      <p style="text-align:center;color:var(--text-muted);font-size:12.5px;margin:0 0 18px;">Escribe tu nueva contraseña para tu cuenta institucional.</p>
+      ${state.recoveryError ? `<div class="invite-error" style="margin-bottom:12px;">${icon('alertTriangle',{size:14})} ${state.recoveryError}</div>` : ''}
+      <form data-action="reset-password-confirm">
+        <div class="field" style="margin-bottom:12px;">
+          <label>Nueva contraseña</label>
+          <input type="password" name="password" placeholder="Mínimo 6 caracteres" autofocus ${state.recoveryBusy?'disabled':''}>
+        </div>
+        <div class="field" style="margin-bottom:14px;">
+          <label>Confirmar nueva contraseña</label>
+          <input type="password" name="password2" placeholder="••••••••" ${state.recoveryBusy?'disabled':''}>
+        </div>
+        <button type="submit" class="btn primary" style="width:100%;justify-content:center;" ${state.recoveryBusy?'disabled':''}>${icon('login',{size:15})} ${state.recoveryBusy?'Guardando…':'Guardar nueva contraseña'}</button>
+      </form>
     </div>
   </div>`;
 }
@@ -1108,6 +1423,73 @@ function bindLoginEvents(){
     state.loginMode = state.loginMode === 'signup' ? 'signin' : 'signup';
     state.loginError = null; state.loginNotice = null;
     render();
+  }));
+
+  app.querySelectorAll('[data-action="login-forgot-password"]').forEach(el=>el.addEventListener('click', e=>{
+    e.preventDefault();
+    state.loginMode = 'reset'; state.loginError = null; state.loginNotice = null;
+    render();
+  }));
+  app.querySelectorAll('[data-action="login-back-to-signin"]').forEach(el=>el.addEventListener('click', e=>{
+    e.preventDefault();
+    state.loginMode = 'signin'; state.loginError = null; state.loginNotice = null;
+    render();
+  }));
+  app.querySelectorAll('[data-action="reset-password-request"]').forEach(form=>form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const raw = form.email.value.trim();
+    const emailLower = raw.toLowerCase();
+    state.loginEmailValue = raw;
+    if (!emailLower){ state.loginError = 'Escribe tu correo institucional para continuar.'; render(); return; }
+    if (!emailLower.endsWith(DOMAIN)){ state.loginError = `Solo se aceptan correos institucionales ${DOMAIN}.`; render(); return; }
+    const client = getSupabaseClient();
+    if (!client){ state.loginError = 'No hay una conexión a Supabase configurada.'; render(); return; }
+    state.loginBusy = true; state.loginError = null; render();
+    try {
+      // La URL a la que Supabase redirige después de que la persona hace clic en el
+      // enlace del correo — debe estar en Authentication → URL Configuration →
+      // Redirect URLs de tu proyecto (ver SUPABASE_SETUP.md). Usamos la URL actual
+      // de esta página para que funcione dondequiera que la tengas publicada.
+      const redirectTo = window.location.href.split('#')[0].split('?')[0];
+      const { error } = await client.auth.resetPasswordForEmail(emailLower, { redirectTo });
+      if (error) throw error;
+      state.loginBusy = false;
+      state.loginMode = 'signin';
+      // Por seguridad, Supabase no distingue si el correo existe o no — el mensaje es el mismo en ambos casos.
+      state.loginNotice = 'Si ese correo tiene una cuenta activa, te enviamos un enlace para restablecer la contraseña — revisa tu bandeja de entrada (y la carpeta de spam). El enlace vence después de un tiempo.';
+      render();
+    } catch (err) {
+      state.loginBusy = false;
+      state.loginError = 'No se pudo enviar el correo: ' + friendlySupabaseError(err);
+      render();
+    }
+  }));
+  app.querySelectorAll('[data-action="reset-password-confirm"]').forEach(form=>form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const password = form.password.value;
+    const password2 = form.password2.value;
+    if (!password || password.length < 6){ state.recoveryError = 'La contraseña debe tener al menos 6 caracteres.'; render(); return; }
+    if (password !== password2){ state.recoveryError = 'Las contraseñas no coinciden.'; render(); return; }
+    const client = getSupabaseClient();
+    if (!client){ state.recoveryError = 'No hay una conexión a Supabase configurada.'; render(); return; }
+    state.recoveryBusy = true; state.recoveryError = null; render();
+    try {
+      const { error } = await client.auth.updateUser({ password });
+      if (error) throw error;
+      await client.auth.signOut().catch(()=>{});
+      // Limpia el token de recuperación de la URL para que no se reactive esta pantalla al recargar.
+      try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch(e){}
+      state.recoveryBusy = false;
+      state.recoveryMode = false;
+      state.loginMode = 'signin';
+      state.loginEmailValue = '';
+      state.loginNotice = 'Tu contraseña se actualizó correctamente. Inicia sesión con tu nueva contraseña.';
+      render();
+    } catch (err) {
+      state.recoveryBusy = false;
+      state.recoveryError = friendlySupabaseError(err);
+      render();
+    }
   }));
 
   app.querySelectorAll('[data-action="signup-submit"]').forEach(form=>form.addEventListener('submit', async e=>{
@@ -1192,28 +1574,15 @@ function renderSidebar(){
     </button>`;
   }).join('');
 
-  const usersGrouped = DEPARTMENTS.map(d => ({ d, list: usersInDept(d.id) }));
-
   return `<div class="sidebar">
     <div class="brand">
       <div class="brand-mark">HL</div>
       <div class="brand-text">
         <div class="name">Happy Learning School</div>
-        <div class="sub">Panel Ejecutivo</div>
+        <div class="sub">Gestión de Proyectos HLS</div>
       </div>
     </div>
     <div class="nav-section">
-      <div class="viewas-box">
-        <label>Ver como</label>
-        <select data-action="switch-user">
-          <optgroup label="Dirección">
-            ${leadershipUsers().map(us=>`<option value="${us.id}" ${u.id===us.id?'selected':''}>${us.name} — ${ROLE_LABELS[us.role]}</option>`).join('')}
-          </optgroup>
-          ${usersGrouped.map(g=>`<optgroup label="${g.d.name}">
-            ${g.list.map(us=>`<option value="${us.id}" ${u.id===us.id?'selected':''}>${us.name} — ${ROLE_LABELS[us.role]}</option>`).join('')}
-          </optgroup>`).join('')}
-        </select>
-      </div>
       ${leader ? `<button class="nav-item ${state.view==='dashboard'?'active':''}" data-action="open-dashboard">
         <span class="nav-icon">${icon('chart',{size:15})}</span><span>Panel General</span>
       </button>` : ''}
@@ -1241,18 +1610,18 @@ function renderSidebar(){
       <button class="theme-toggle" data-action="logout" style="margin-top:6px;">
         <span class="nav-icon">${icon('x',{size:14})}</span><span>Cerrar sesión (${u.name.split(' ')[0]})</span>
       </button>
-      <div class="demo-note">Datos de ejemplo con fines de demostración. Los cambios (tablero, checklists, usuarios, adjuntos) se guardan solo durante esta sesión del navegador — no hay envío real de correos ni almacenamiento permanente.</div>
+      <div class="demo-note">Sesión real de Supabase: los cambios (tablero, checklists, usuarios, adjuntos) quedan guardados de forma permanente, y las invitaciones y los restablecimientos de contraseña envían correos reales.</div>
     </div>
   </div>`;
 }
 
 function renderTopbar(){
-  let title = 'Panel Ejecutivo';
+  let title = 'Panel General';
   let crumb = ROLE_LABELS[currentUser().role] + ' · Vista institucional';
   if (state.view==='department'){
     const d = dept(state.deptId);
     title = d.name;
-    crumb = 'Departamento · Coordinador(a): ' + d.coord;
+    crumb = d.coord ? ('Departamento · Coordinador(a): ' + d.coord) : 'Departamento';
   } else if (state.view==='calendar'){
     title = 'Calendario institucional';
     crumb = isLeadership() ? 'Fechas límite de todos los departamentos' : 'Fechas límite de ' + dept(currentUser().deptId).name;
@@ -1305,10 +1674,10 @@ function renderDashboard(){
 
   return `
   <div class="stat-row">
-    <div class="stat-tile"><div class="label">Tareas activas</div><div class="value">${s.total}</div><div class="delta">En los 10 departamentos</div></div>
+    <div class="stat-tile"><div class="label">Tareas activas</div><div class="value">${s.total}</div><div class="delta">En los ${DEPARTMENTS.length} departamentos</div></div>
     <div class="stat-tile"><div class="label">Completadas</div><div class="value">${s.completadas}</div><div class="delta good">${Math.round(s.completadas/s.total*100)}% del total</div></div>
     <div class="stat-tile"><div class="label">Atrasadas</div><div class="value">${s.atrasadas}</div><div class="delta ${s.atrasadas>0?'critical':''}">${s.atrasadas>0? 'Requieren atención' : 'Sin atrasos'}</div></div>
-    <div class="stat-tile"><div class="label">Cumplimiento institucional</div><div class="value">${s.pct}%</div><div class="delta">Promedio de los 10 departamentos</div></div>
+    <div class="stat-tile"><div class="label">Cumplimiento institucional</div><div class="value">${s.pct}%</div><div class="delta">Promedio de los ${DEPARTMENTS.length} departamentos</div></div>
   </div>
 
   <div class="section">
@@ -1322,7 +1691,7 @@ function renderDashboard(){
             <span class="dept-card-name">${d.name}${d.confidential?`<span class="confidential-badge" title="Acceso restringido a Coordinación y Dirección General">${icon('lock',{size:12})}</span>`:''}</span>
             <span class="semaphore-pill" style="background:${semaphoreColor(st.pct)}"></span>
           </div>
-          <div class="coord">${icon(d.icon,{size:14,cls:'dept-icon'})} ${d.coord}</div>
+          ${d.coord ? `<div class="coord">${icon(d.icon,{size:14,cls:'dept-icon'})} ${d.coord}</div>` : `<div class="coord">${icon(d.icon,{size:14,cls:'dept-icon'})} <span style="font-style:italic;">Sin coordinador asignado</span></div>`}
           <div class="pct-row"><span class="pct">${st.pct}%</span><span class="pct-label">${semaphoreWord(st.pct)}</span></div>
           <div class="progress-track"><div class="progress-fill" style="width:${st.pct}%;background:${semaphoreColor(st.pct)}"></div></div>
           <div class="mini-stats"><span><b>${st.atrasadas}</b> atrasadas</span><span><b>${st.pendientes+st.progreso+st.revision}</b> en curso</span><span><b>${st.completadas}</b> hechas</span></div>
@@ -1354,7 +1723,7 @@ function renderDashboard(){
             return `<tr data-action="open-dept" data-dept="${t.deptId}">
               <td>${t.title}</td>
               <td><span class="dept-color-dot" style="background:${d.color};display:inline-block;margin-right:6px;"></span>${d.name}</td>
-              <td>${t.resp}${t.cargo?` <span style="color:var(--text-muted)">(${t.cargo})</span>`:''}</td>
+              <td>${taskAssigneeSummary(t)}</td>
               <td class="${t.over?'':''}" style="${t.over?'color:var(--critical);font-weight:700;':''}">${fmtDateShort(t.due)}${t.over?' · vencida':''}</td>
               <td><span class="badge priority-${t.priority}">${PRIORITY_LABELS[t.priority]}</span></td>
               <td><span class="badge status-${t.over?'atrasado':t.status}">${t.over?'Atrasado':STATUS_LABELS[t.status]}</span></td>
@@ -1374,7 +1743,7 @@ function renderDepartment(){
   const st = deptStats(d.id);
   const tasks = TASKS.filter(t=>t.deptId===d.id);
   const checklist = CHECKLISTS[d.id];
-  const responsables = [...new Set(tasks.map(t=>t.resp))];
+  const responsables = [...new Set(tasks.flatMap(t=>taskAssigneeList(t).map(a=>a.name)))];
 
   let confidentialNote = d.confidential ? `<div class="confidential-note">${icon('lock',{size:14})} <b>Confidencialidad reforzada:</b> en la aplicación completa, los expedientes de este departamento solo son visibles para su coordinación y para Dirección General. En esta vista de demostración se muestran a modo de ejemplo.</div>` : '';
 
@@ -1382,7 +1751,7 @@ function renderDepartment(){
   <div class="dept-banner" style="background:linear-gradient(135deg, ${d.color}, ${d.color}cc);">
     <div class="titles">
       <h2>${icon(d.icon,{size:22,cls:'dept-icon-lg'})} ${d.name}</h2>
-      <div class="coord">Coordinador(a): ${d.coord}</div>
+      ${d.coord ? `<div class="coord">Coordinador(a): ${d.coord}</div>` : ''}
     </div>
     <div class="kpis">
       <div class="k"><div class="v">${st.pct}%</div><div class="l">Cumplimiento</div></div>
@@ -1419,14 +1788,19 @@ function renderDepartment(){
         <button class="${state.deptSubview==='list'?'active':''}" data-action="dept-subview" data-sub="list">Lista de tareas</button>
       </div>
       <button class="btn primary" data-action="open-new-task" data-dept="${d.id}">+ Nueva tarea</button>
+      <button class="btn" data-action="export-template" data-dept="${d.id}">${icon('database',{size:13})} Exportar plantilla</button>
+      <label class="btn" style="cursor:pointer;">${icon('database',{size:13})} Importar plantilla<input type="file" accept="application/json" style="display:none;" data-action="import-template" data-dept="${d.id}"></label>
       ${state.deptSubview==='list' ? `
       <select data-action="filter" data-filter="resp"><option value="all">Todos los responsables</option>${responsables.map(r=>`<option value="${r}" ${state.filters.resp===r?'selected':''}>${r}</option>`).join('')}</select>
       <select data-action="filter" data-filter="status"><option value="all">Todos los estados</option>${STATUS_ORDER.map(s=>`<option value="${s}" ${state.filters.status===s?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select>
       <select data-action="filter" data-filter="priority"><option value="all">Toda prioridad</option>${Object.keys(PRIORITY_LABELS).map(p=>`<option value="${p}" ${state.filters.priority===p?'selected':''}>${PRIORITY_LABELS[p]}</option>`).join('')}</select>
       ` : '<span class="hint" style="color:var(--text-muted);font-size:12px;">Arrastra las tarjetas entre columnas para actualizar el estado</span>'}
     </div>
+    ${state.templateError ? `<div class="invite-error" style="margin-bottom:10px;">${icon('alertTriangle',{size:14})} ${state.templateError}</div>` : ''}
+    ${state.templateBanner ? `<div class="invite-link-banner" style="margin-bottom:10px;">${icon('checkCircle',{size:14})} ${state.templateBanner}</div>` : ''}
     ${state.deptSubview==='kanban' ? renderKanban(d, tasks) : renderTaskList(d, tasks)}
-  </div>`;
+  </div>
+  ${state.deptSubview==='list' ? renderBulkToolbar(d) : ''}`;
 }
 
 function renderKanban(d, tasks){
@@ -1454,7 +1828,7 @@ function renderTaskCard(t){
   return `<div class="task-card" draggable="true" data-taskid="${t.id}" data-action="drag-task">
     <div class="t-title">${t.title}</div>
     <div class="t-meta">
-      <span class="t-resp">${t.resp}${t.cargo?` · ${t.cargo}`:''}</span>
+      <span class="t-resp">${taskAssigneeSummary(t)}</span>
       <span class="badge priority-${t.priority}">${PRIORITY_LABELS[t.priority]}</span>
     </div>
     <div class="t-due ${over?'overdue':''}">${over?'Venció':'Vence'} ${fmtDateShort(due)}</div>
@@ -1465,25 +1839,29 @@ function renderTaskCard(t){
 function renderTaskList(d, tasks){
   const f = state.filters;
   const filtered = tasks.filter(t =>
-    (f.resp==='all'||t.resp===f.resp) &&
+    (f.resp==='all'||taskAssigneeList(t).some(a=>a.name===f.resp)) &&
     (f.status==='all'||t.status===f.status) &&
     (f.priority==='all'||t.priority===f.priority)
   ).sort((a,b)=> dueDate(a)-dueDate(b));
 
   if (filtered.length===0) return `<div class="panel"><div class="empty-state">No hay tareas que coincidan con los filtros seleccionados.</div></div>`;
 
+  const allSelected = filtered.length>0 && filtered.every(t=>state.selectedTaskIds.has(t.id));
+
   return `<div class="panel">
     <table class="task-list-table">
-      <thead><tr><th>Tarea</th><th>Responsable</th><th>Prioridad</th><th>Estado</th><th>Vence</th><th>Detalle</th></tr></thead>
+      <thead><tr><th class="row-select-cell"><input type="checkbox" data-action="select-all-tasks" ${allSelected?'checked':''}></th><th>Tarea</th><th>Responsable(s)</th><th>Prioridad</th><th>Estado</th><th>Vence</th><th>Detalle</th></tr></thead>
       <tbody>
         ${filtered.map(t=>{
           const over = isOverdue(t);
           const attCount = (TASK_ATTACHMENTS[t.id]||[]).length;
           const noteCount = (TASK_NOTES[t.id]||[]).length;
           const bits = [attCount?icon('paperclip',{size:12})+attCount:null, noteCount?icon('fileText',{size:12})+noteCount:null].filter(Boolean).join(' ');
-          return `<tr data-action="open-task-modal" data-taskid="${t.id}">
+          const checked = state.selectedTaskIds.has(t.id);
+          return `<tr data-action="open-task-modal" data-taskid="${t.id}" class="${checked?'row-selected':''}">
+            <td class="row-select-cell"><input type="checkbox" data-action="select-task" data-taskid="${t.id}" ${checked?'checked':''}></td>
             <td>${t.title}</td>
-            <td>${t.resp}${t.cargo?` <span style="color:var(--text-muted)">(${t.cargo})</span>`:''}</td>
+            <td>${taskAssigneeSummary(t)}</td>
             <td><span class="badge priority-${t.priority}">${PRIORITY_LABELS[t.priority]}</span></td>
             <td><span class="badge status-${over?'atrasado':t.status}">${over?'Atrasado':STATUS_LABELS[t.status]}</span></td>
             <td style="${over?'color:var(--critical);font-weight:700;':''}">${fmtDateShort(dueDate(t))}</td>
@@ -1492,6 +1870,58 @@ function renderTaskList(d, tasks){
         }).join('')}
       </tbody>
     </table>
+  </div>`;
+}
+
+/* =========================================================
+   BARRA DE ACCIONES EN BLOQUE (selección múltiple en la lista)
+   ========================================================= */
+function renderBulkToolbar(d){
+  const n = state.selectedTaskIds.size;
+  if (n===0) return '';
+  const menu = state.bulkMenuOpen;
+  let panel = '';
+  if (menu==='status'){
+    panel = `<div class="bulk-menu-panel">
+      <div class="modal-subtitle" style="margin-top:0;">Cambiar estado</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="form-hint" style="margin:0 0 2px;">No iniciado</div>
+        <button type="button" class="btn" data-action="bulk-apply-status" data-status="pendiente">${STATUS_LABELS.pendiente}</button>
+        <div class="form-hint" style="margin:6px 0 2px;">Activo</div>
+        <button type="button" class="btn" data-action="bulk-apply-status" data-status="progreso">${STATUS_LABELS.progreso}</button>
+        <button type="button" class="btn" data-action="bulk-apply-status" data-status="revision">${STATUS_LABELS.revision}</button>
+        <div class="form-hint" style="margin:6px 0 2px;">Cerrado</div>
+        <button type="button" class="btn" data-action="bulk-apply-status" data-status="completado">${STATUS_LABELS.completado}</button>
+        <button type="button" class="btn" data-action="bulk-apply-status" data-status="atrasado">${STATUS_LABELS.atrasado}</button>
+      </div>
+    </div>`;
+  } else if (menu==='assignees'){
+    panel = renderAssigneePicker(d.id, 'media');
+  } else if (menu==='dates'){
+    panel = `<div class="bulk-menu-panel">
+      <div class="modal-subtitle" style="margin-top:0;">Cambiar fecha límite</div>
+      <input type="date" value="${state.bulkDateValue||toISODate(today())}" data-action="bulk-date-value" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font-size:12.5px;margin-bottom:10px;">
+      <button type="button" class="btn primary" data-action="bulk-apply-date">Aplicar a ${n} tarea(s)</button>
+    </div>`;
+  } else if (menu==='more'){
+    panel = `<div class="bulk-menu-panel">
+      <div class="modal-subtitle" style="margin-top:0;">Prioridad</div>
+      <div style="display:flex;gap:6px;margin-bottom:12px;">
+        ${Object.keys(PRIORITY_LABELS).map(p=>`<button type="button" class="btn" data-action="bulk-apply-priority" data-priority="${p}">${PRIORITY_LABELS[p]}</button>`).join('')}
+      </div>
+      <div class="modal-subtitle">Plantilla</div>
+      <button type="button" class="btn" data-action="export-template-selected" style="margin-bottom:8px;">${icon('database',{size:13})} Exportar seleccionadas como plantilla</button>
+    </div>`;
+  }
+  return `${panel}
+  <div class="bulk-toolbar">
+    <span class="count">${n} seleccionada(s)</span>
+    <button type="button" class="btn" data-action="bulk-menu-toggle" data-menu="status">${icon('checkCircle',{size:13})} Estado</button>
+    <button type="button" class="btn" data-action="bulk-menu-toggle" data-menu="assignees">${icon('userPlus',{size:13})} Personas asignadas</button>
+    <button type="button" class="btn" data-action="bulk-menu-toggle" data-menu="dates">${icon('calendar',{size:13})} Fechas</button>
+    <button type="button" class="btn" data-action="bulk-delete" style="color:var(--critical);border-color:var(--critical);">${icon('trash',{size:13})}${state.deleteConfirmId==='bulk'?' ¿Confirmar?':''}</button>
+    <button type="button" class="btn" data-action="bulk-menu-toggle" data-menu="more">${icon('edit',{size:13})} Más</button>
+    <button type="button" class="btn" data-action="bulk-clear-selection">${icon('x',{size:13})}</button>
   </div>`;
 }
 
@@ -1514,8 +1944,9 @@ function renderTaskModal(taskId){
     if (a.type==='drive' || a.type==='link') return icon('link',{size:15,cls:'att-link'});
     return icon('paperclip',{size:15});
   };
-  const users = assignableUsers(t.deptId);
   const confirming = state.deleteConfirmId === t.id;
+  const assigneeList = taskAssigneeList(t);
+  const pickerOpenHere = state.assigneeUI.open && state.assigneeUI.mode==='task' && state.assigneeUI.taskId===t.id;
 
   return `<div class="modal-overlay" data-action="close-modal">
     <div class="modal-panel" data-stop="1">
@@ -1533,26 +1964,50 @@ function renderTaskModal(taskId){
           <span><span class="dept-color-dot" style="background:${d.color};display:inline-block;margin-right:5px;"></span><b>${d.name}</b></span>
           <span style="color:var(--text-muted);">${t.assignedBy ? `Asignado por <b style="color:var(--text-secondary);">${t.assignedBy}</b>` : 'Tarea predefinida del departamento'}</span>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-          <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Responsable</label>
-            <select data-action="modal-resp" data-taskid="${t.id}" style="width:100%;">
-              ${users.map(u=>`<option value="${u.id}" ${u.name===t.resp?'selected':''}>${u.name}${u.cargo?` (${u.cargo})`:''} — ${ROLE_LABELS[u.role]}</option>`).join('')}
-            </select>
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Personas asignadas</label>
+          <div class="assignee-chip-row">
+            ${assigneeList.length===0 ? '<span class="form-hint">Sin asignar todavía.</span>' : assigneeList.map(a=>{
+              const canToggle = canToggleAssigneeDelivery(t, a.userId || a.name);
+              return `<span class="assignee-chip">
+                <span class="avatar" style="background:${d.color}">${userInitials(a.name)}</span>
+                <span class="name">${a.name}${a.cargo?` · ${a.cargo}`:''}</span>
+                <span class="deliver-badge ${a.status}" ${canToggle?`data-action="toggle-assignee-status" data-taskid="${t.id}" data-userid="${a.userId||a.name}" style="cursor:pointer;" title="Clic para cambiar"`:''}>${a.status==='completado'?icon('check',{size:10})+' Entregado':'Pendiente'}</span>
+              </span>`;
+            }).join('')}
           </div>
+          <button type="button" class="btn" data-action="open-assignee-picker" data-mode="task" data-taskid="${t.id}" style="margin-top:8px;">${icon('userPlus',{size:13})} Gestionar asignados</button>
+          ${pickerOpenHere ? renderAssigneePicker(t.deptId, t.priority) : ''}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
           <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Prioridad</label>
             <select data-action="modal-priority" data-taskid="${t.id}" style="width:100%;">
               ${Object.keys(PRIORITY_LABELS).map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${PRIORITY_LABELS[p]}</option>`).join('')}
             </select>
           </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-          <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Estado</label>
-            <select data-action="modal-status" data-taskid="${t.id}" style="width:100%;">
-              ${STATUS_ORDER.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}
-            </select>
-          </div>
           <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Fecha límite${over?' <span style="color:var(--critical)">(vencida)</span>':''}</label>
             <input type="date" value="${toISODate(dueDate(t))}" data-action="modal-due" data-taskid="${t.id}" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font-size:12.5px;">
+          </div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Estado</label>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <select data-action="modal-status" data-taskid="${t.id}" style="flex:1;min-width:160px;">
+              <optgroup label="No iniciado">
+                <option value="pendiente" ${t.status==='pendiente'?'selected':''}>${STATUS_LABELS.pendiente}</option>
+              </optgroup>
+              <optgroup label="Activo">
+                <option value="progreso" ${t.status==='progreso'?'selected':''}>${STATUS_LABELS.progreso}</option>
+                <option value="revision" ${t.status==='revision'?'selected':''}>${STATUS_LABELS.revision}</option>
+              </optgroup>
+              <optgroup label="Cerrado">
+                <option value="completado" ${t.status==='completado'?'selected':''}>${STATUS_LABELS.completado}</option>
+                <option value="atrasado" ${t.status==='atrasado'?'selected':''}>${STATUS_LABELS.atrasado}</option>
+              </optgroup>
+            </select>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-muted);white-space:nowrap;">
+              <input type="checkbox" data-action="modal-notify" data-taskid="${t.id}" ${t.notify?'checked':''}> Enviar notificaciones
+            </label>
           </div>
         </div>
 
@@ -1620,17 +2075,18 @@ function renderNewTaskModal(deptId){
             <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Título de la tarea</label>
             <input type="text" name="title" placeholder="Ej. Revisión de…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-primary);font-size:13px;">
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-            <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Responsable</label>
-              <select name="respId" style="width:100%;">
-                ${users.map(u=>`<option value="${u.id}">${u.name}${u.cargo?` (${u.cargo})`:''} — ${ROLE_LABELS[u.role]}</option>`).join('')}
-              </select>
-            </div>
-            <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Prioridad</label>
-              <select name="priority" style="width:100%;">
-                <option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option>
-              </select>
-            </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Personas asignadas <span style="font-weight:400;">(Ctrl/Cmd+clic para elegir varias)</span></label>
+            <select name="respIds" id="new-task-resp-ids" multiple size="4" style="width:100%;">
+              ${users.map(u=>`<option value="${u.id}">${u.name}${u.cargo?` (${u.cargo})`:''} — ${ROLE_LABELS[u.role]}</option>`).join('')}
+            </select>
+            <button type="button" class="btn" data-action="new-task-ai-assign" data-dept="${deptId}" style="margin-top:6px;">${icon('checkCircle',{size:12})} Sugerir con IA</button>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Prioridad</label>
+            <select name="priority" style="width:100%;">
+              <option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option>
+            </select>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
             <div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:5px;">Estado inicial</label>
@@ -1704,7 +2160,7 @@ function renderCalendar(){
             return `<tr data-action="open-dept" data-dept="${t.deptId}">
               <td>${t.title}</td>
               <td><span class="dept-color-dot" style="background:${d.color};display:inline-block;margin-right:6px;"></span>${d.name}</td>
-              <td>${t.resp}</td>
+              <td>${taskAssigneeSummary(t)}</td>
               <td><span class="badge status-${over?'atrasado':t.status}">${over?'Atrasado':STATUS_LABELS[t.status]}</span></td>
             </tr>`;
           }).join('')}
@@ -2040,7 +2496,7 @@ function renderSettings(){
    ========================================================= */
 function renderMyTasks(){
   const u = currentUser();
-  const mine = TASKS.filter(t => t.resp === u.name).map(t=>({...t, due:dueDate(t), over:isOverdue(t)})).sort((a,b)=>a.due-b.due);
+  const mine = TASKS.filter(t => isTaskMine(t)).map(t=>({...t, due:dueDate(t), over:isOverdue(t)})).sort((a,b)=>a.due-b.due);
   const checklist = PERSONAL_CHECKLISTS[u.id] || (PERSONAL_CHECKLISTS[u.id] = []);
   const clDone = checklist.filter(i=>i.done).length;
   const clPct = checklist.length ? Math.round(clDone/checklist.length*100) : 0;
@@ -2050,19 +2506,23 @@ function renderMyTasks(){
     <div class="panel">
       ${mine.length===0 ? `<div class="empty-state">${(u.role==='directora'||u.role==='gerente') ? 'No tienes tareas operativas asignadas todavía — puedes asignarte una desde cualquier departamento con "+ Nueva tarea", o usar el Panel General para el seguimiento institucional.' : 'No tienes tareas asignadas por el momento.'}</div>` : `
       <table class="task-list-table">
-        <thead><tr><th>Tarea</th><th>Departamento</th><th>Asignado por</th><th>Prioridad</th><th>Vence</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Tarea</th><th>Departamento</th><th>Compañeros</th><th>Prioridad</th><th>Vence</th><th>Estado de la tarea</th><th>Mi entrega</th></tr></thead>
         <tbody>
           ${mine.map(t=>{
             const d = dept(t.deptId);
+            const list = taskAssigneeList(t);
+            const others = list.filter(a=> !((a.userId&&a.userId===u.id)||a.name===u.name));
+            const mine2 = myAssigneeEntry(t);
             return `<tr>
               <td style="cursor:pointer;" data-action="open-task-modal" data-taskid="${t.id}">${t.title} ${(TASK_ATTACHMENTS[t.id]||[]).length>0?icon('paperclip',{size:12}):''}</td>
               <td><span class="dept-color-dot" style="background:${d.color};display:inline-block;margin-right:6px;"></span>${d.name}</td>
-              <td style="color:var(--text-muted);">${t.assignedBy ? t.assignedBy : '<span style="font-style:italic;">Predefinida</span>'}</td>
+              <td style="color:var(--text-muted);font-size:12px;">${others.length ? others.map(a=>a.name).join(', ') : '—'}</td>
               <td><span class="badge priority-${t.priority}">${PRIORITY_LABELS[t.priority]}</span></td>
               <td style="${t.over?'color:var(--critical);font-weight:700;':''}">${fmtDateShort(t.due)}${t.over?' · vencida':''}</td>
               <td><select data-action="update-my-task-status" data-taskid="${t.id}">
                 ${STATUS_ORDER.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}
               </select></td>
+              <td>${mine2 ? `<span class="deliver-badge ${mine2.status}" data-action="toggle-assignee-status" data-taskid="${t.id}" data-userid="${mine2.userId||mine2.name}" style="cursor:pointer;" title="Clic para cambiar">${mine2.status==='completado'?icon('check',{size:10})+' Entregado':'Marcar entregado'}</span>` : '—'}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -2106,11 +2566,15 @@ function bindEvents(){
   }));
   app.querySelectorAll('[data-action="open-dept"]').forEach(el=>el.addEventListener('click',()=>{
     state.view='department'; state.deptId=el.getAttribute('data-dept'); state.deptSubview='kanban';
-    state.filters={resp:'all',status:'all',priority:'all'}; state.checklistError=null; render();
+    state.filters={resp:'all',status:'all',priority:'all'}; state.checklistError=null;
+    state.selectedTaskIds=new Set(); state.bulkMenuOpen=null; state.templateError=null; state.templateBanner=null; closeAssigneePicker();
+    render();
     if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
   }));
   app.querySelectorAll('[data-action="reload-tasks-module"]').forEach(el=>el.addEventListener('click', loadRemoteTasksModule));
-  app.querySelectorAll('[data-action="dept-subview"]').forEach(el=>el.addEventListener('click',()=>{ state.deptSubview=el.getAttribute('data-sub'); render(); }));
+  app.querySelectorAll('[data-action="dept-subview"]').forEach(el=>el.addEventListener('click',()=>{
+    state.deptSubview=el.getAttribute('data-sub'); state.selectedTaskIds=new Set(); state.bulkMenuOpen=null; closeAssigneePicker(); render();
+  }));
   app.querySelectorAll('[data-action="filter"]').forEach(el=>el.addEventListener('change',()=>{
     state.filters[el.getAttribute('data-filter')] = el.value; render();
   }));
@@ -2207,15 +2671,142 @@ function bindEvents(){
     });
   });
 
-  // Ver como / navegación de roles
-  app.querySelectorAll('[data-action="switch-user"]').forEach(el=>el.addEventListener('change',()=>{
-    state.currentUserId = el.value;
-    const u = currentUser();
-    state.taskModalId = null; state.newTaskDeptId = null; state.deleteConfirmId = null; state.inviteError = null; state.inviteBanner = null;
-    if (u.role==='directora' || u.role==='gerente'){ state.view = 'dashboard'; state.deptId = null; }
-    else { state.view = 'department'; state.deptId = u.deptId; state.deptSubview = 'kanban'; state.filters = {resp:'all',status:'all',priority:'all'}; }
+  // ---- Selección múltiple y acciones en bloque (reasignar / mover fechas / eliminar) ----
+  app.querySelectorAll('[data-action="select-task"]').forEach(el=>{
+    el.addEventListener('click', e=> e.stopPropagation());
+    el.addEventListener('change', ()=>{
+      const id = el.getAttribute('data-taskid');
+      if (el.checked) state.selectedTaskIds.add(id); else state.selectedTaskIds.delete(id);
+      render();
+    });
+  });
+  app.querySelectorAll('[data-action="select-all-tasks"]').forEach(el=>{
+    el.addEventListener('click', e=> e.stopPropagation());
+    el.addEventListener('change', ()=>{
+      const f = state.filters;
+      const filtered = TASKS.filter(t=>t.deptId===state.deptId).filter(t =>
+        (f.resp==='all'||taskAssigneeList(t).some(a=>a.name===f.resp)) &&
+        (f.status==='all'||t.status===f.status) &&
+        (f.priority==='all'||t.priority===f.priority)
+      );
+      if (el.checked) filtered.forEach(t=>state.selectedTaskIds.add(t.id));
+      else filtered.forEach(t=>state.selectedTaskIds.delete(t.id));
+      render();
+    });
+  });
+  app.querySelectorAll('[data-action="bulk-menu-toggle"]').forEach(el=>el.addEventListener('click', e=>{
+    e.stopPropagation();
+    const menu = el.getAttribute('data-menu');
+    if (state.bulkMenuOpen === menu){ state.bulkMenuOpen = null; }
+    else {
+      state.bulkMenuOpen = menu;
+      if (menu==='assignees') state.assigneeUI = { open:true, mode:'bulk', taskId:null, search:'', checked:new Set(), notify:false };
+    }
     render();
   }));
+  app.querySelectorAll('[data-action="bulk-apply-status"]').forEach(el=>el.addEventListener('click', async ()=>{
+    await applyBulkStatus([...state.selectedTaskIds], el.getAttribute('data-status'));
+    state.bulkMenuOpen = null; render();
+  }));
+  app.querySelectorAll('[data-action="bulk-date-value"]').forEach(el=>el.addEventListener('change', ()=>{ state.bulkDateValue = el.value; }));
+  app.querySelectorAll('[data-action="bulk-apply-date"]').forEach(el=>el.addEventListener('click', async ()=>{
+    const val = state.bulkDateValue || toISODate(today());
+    await applyBulkDueDate([...state.selectedTaskIds], val);
+    state.bulkMenuOpen = null; render();
+  }));
+  app.querySelectorAll('[data-action="bulk-apply-priority"]').forEach(el=>el.addEventListener('click', async ()=>{
+    await applyBulkPriority([...state.selectedTaskIds], el.getAttribute('data-priority'));
+    state.bulkMenuOpen = null; render();
+  }));
+  app.querySelectorAll('[data-action="bulk-delete"]').forEach(el=>el.addEventListener('click', async ()=>{
+    if (state.deleteConfirmId === 'bulk'){
+      await deleteBulkTasks([...state.selectedTaskIds]);
+      state.deleteConfirmId = null; state.bulkMenuOpen = null; render();
+    } else {
+      state.deleteConfirmId = 'bulk'; render();
+    }
+  }));
+  app.querySelectorAll('[data-action="bulk-clear-selection"]').forEach(el=>el.addEventListener('click', ()=>{
+    state.selectedTaskIds = new Set(); state.bulkMenuOpen = null; state.deleteConfirmId = null; closeAssigneePicker(); render();
+  }));
+
+  // ---- Plantillas de tareas (importar / exportar JSON) ----
+  app.querySelectorAll('[data-action="export-template"]').forEach(el=>el.addEventListener('click', ()=>{
+    const deptId = el.getAttribute('data-dept');
+    const list = TASKS.filter(t=>t.deptId===deptId);
+    downloadJSON(buildTemplateFromTasks(deptId, list), `plantilla-${deptId}-${toISODate(today())}.json`);
+    state.templateBanner = `Plantilla exportada con ${list.length} tarea(s) de ${dept(deptId).name}.`;
+    state.templateError = null;
+    render();
+  }));
+  app.querySelectorAll('[data-action="export-template-selected"]').forEach(el=>el.addEventListener('click', ()=>{
+    const ids = [...state.selectedTaskIds];
+    const list = TASKS.filter(t=>ids.includes(t.id));
+    if (!list.length) return;
+    downloadJSON(buildTemplateFromTasks(state.deptId, list), `plantilla-seleccion-${toISODate(today())}.json`);
+    state.templateBanner = `Plantilla exportada con ${list.length} tarea(s) seleccionada(s).`;
+    state.templateError = null;
+    state.bulkMenuOpen = null;
+    render();
+  }));
+  app.querySelectorAll('[data-action="import-template"]').forEach(el=>el.addEventListener('change', async ()=>{
+    const file = el.files[0]; if (!file) return;
+    const deptId = el.getAttribute('data-dept');
+    state.templateError = null; state.templateBanner = null;
+    try {
+      const text = await file.text();
+      const tmpl = JSON.parse(text);
+      if (!tmpl || !Array.isArray(tmpl.tasks)) throw new Error('El archivo no tiene el formato esperado (falta "tasks").');
+      let created = 0;
+      const client = isRealSession() ? getSupabaseClient() : null;
+      for (const raw of tmpl.tasks){
+        const title = (raw.title||'').trim();
+        if (!title) continue;
+        const priority = ['alta','media','baja'].includes(raw.priority) ? raw.priority : 'media';
+        const status = STATUS_ORDER.includes(raw.status) ? raw.status : 'pendiente';
+        const dueVal = toISODate(addDays(today(), Number.isFinite(raw.dueOffsetDays) ? raw.dueOffsetDays : 7));
+        const rawAssignees = Array.isArray(raw.assignees) ? raw.assignees : [];
+        const matchedUsers = rawAssignees.map(a=>findUserByName(a && a.name)).filter(Boolean);
+        const noteVal = (raw.note||'').trim();
+        if (client){
+          const { data: newTask, error } = await client.from('tasks').insert({
+            dept_id: deptId, title, priority, status, due_date: dueVal,
+            resp_user_id: matchedUsers[0] ? matchedUsers[0].id : null, assigned_by_user_id: currentUser().id,
+          }).select().single();
+          if (error) throw error;
+          if (matchedUsers.length){ const { error: aErr } = await client.from('task_assignees').insert(matchedUsers.map(u=>({ task_id:newTask.id, user_id:u.id }))); if (aErr) throw aErr; }
+          if (noteVal) await client.from('task_notes').insert({ task_id: newTask.id, author_id: currentUser().id, text: noteVal });
+          TASKS.push({
+            id: newTask.id, deptId, title, priority: newTask.priority, status: newTask.status,
+            dueOffset: 0, dueDateFixed: newTask.due_date,
+            resp: matchedUsers[0] ? matchedUsers[0].name : '—', cargo: matchedUsers[0] ? (matchedUsers[0].cargo||null) : null,
+            assignedBy: currentUser().name, _respUserId: newTask.resp_user_id, _remote:true, notify:false,
+            assignees: matchedUsers.map(u=>({ userId:u.id, name:u.name, cargo:u.cargo||null, status:'pendiente' })),
+          });
+          if (noteVal) TASK_NOTES[newTask.id] = [{ author: currentUser().name, offset:0, text: noteVal, _remote:true }];
+        } else {
+          const id = newTaskId();
+          TASKS.push({
+            id, deptId, title, priority, status, dueOffset:0, dueDateFixed: dueVal,
+            resp: matchedUsers[0] ? matchedUsers[0].name : '—', cargo: matchedUsers[0] ? (matchedUsers[0].cargo||null) : null,
+            assignedBy: currentUser().name, notify:false,
+            assignees: matchedUsers.map(u=>({ userId:u.id, name:u.name, cargo:u.cargo||null, status:'pendiente' })),
+          });
+          if (noteVal) TASK_NOTES[id] = [{ author: currentUser().name, offset:0, text: noteVal }];
+        }
+        created++;
+      }
+      state.templateBanner = `Se importaron ${created} tarea(s) desde la plantilla.`;
+      el.value = '';
+      render();
+    } catch (err) {
+      state.templateError = isRealSession() ? friendlySupabaseError(err) : ('No se pudo leer la plantilla: ' + (err && err.message ? err.message : err));
+      el.value = '';
+      render();
+    }
+  }));
+
+  // Navegación de roles
   app.querySelectorAll('[data-action="open-users"]').forEach(el=>el.addEventListener('click',()=>{
     state.view='users'; state.inviteError=null; state.inviteBanner=null; render();
     if (isRealSession() && !state.remote.users && !state.remote.loading) loadRemoteUsersModule();
@@ -2239,6 +2830,7 @@ function bindEvents(){
       editUserId: null, editError: null, deleteConfirmId: null,
     };
     state.remoteTasks = { loaded: false, loading: false, error: null };
+    state.selectedTaskIds = new Set(); state.bulkMenuOpen = null; closeAssigneePicker();
     restoreDemoData(); // evita mezclar datos reales de Supabase con el modo demo/"Ver como"
     render();
   }));
@@ -2281,11 +2873,11 @@ function bindEvents(){
   // Modal de tarea (ver / editar / adjuntos / notas)
   app.querySelectorAll('[data-action="open-task-modal"]').forEach(el=>el.addEventListener('click', e=>{
     e.stopPropagation();
-    state.taskModalId = el.getAttribute('data-taskid'); state.newTaskDeptId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; render();
+    state.taskModalId = el.getAttribute('data-taskid'); state.newTaskDeptId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; closeAssigneePicker(); render();
   }));
   app.querySelectorAll('[data-action="close-modal"]').forEach(el=>el.addEventListener('click', e=>{
     if (el.classList.contains('modal-overlay') && e.target !== el) return;
-    state.taskModalId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; render();
+    state.taskModalId = null; state.deleteConfirmId = null; state.attachError = null; state.taskError = null; closeAssigneePicker(); render();
   }));
   app.querySelectorAll('[data-action="modal-status"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
@@ -2317,20 +2909,82 @@ function bindEvents(){
     }
     task.title = newVal; render();
   }));
-  app.querySelectorAll('[data-action="modal-resp"]').forEach(el=>el.addEventListener('change', async ()=>{
-    const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
-    const u = USERS.find(x=>x.id===el.value);
-    if (!task || !u) return;
-    if (isRealSession()){
-      const client = getSupabaseClient();
-      try {
-        const { error } = await client.from('tasks').update({ resp_user_id: u.id, updated_at: new Date().toISOString() }).eq('id', task.id);
-        if (error) throw error;
-        task.resp = u.name; task.cargo = u.cargo || null; task._respUserId = u.id; render();
-      } catch (err) { state.taskError = friendlySupabaseError(err); render(); }
-      return;
+  // ---- Personas asignadas (multi-responsable) ----
+  app.querySelectorAll('[data-action="open-assignee-picker"]').forEach(el=>el.addEventListener('click', e=>{
+    e.stopPropagation();
+    const mode = el.getAttribute('data-mode');
+    const taskId = el.getAttribute('data-taskid');
+    if (mode==='task'){
+      const task = TASKS.find(t=>t.id===taskId);
+      if (!task) return;
+      state.assigneeUI = { open:true, mode:'task', taskId, search:'', checked: new Set(taskAssigneeList(task).map(a=>a.userId).filter(Boolean)), notify: !!task.notify };
+    } else {
+      state.assigneeUI = { open:true, mode:'bulk', taskId:null, search:'', checked:new Set(), notify:false };
     }
-    task.resp = u.name; task.cargo = u.cargo || null; render();
+    render();
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-search"]').forEach(el=>el.addEventListener('input', ()=>{
+    const pos = el.selectionStart;
+    state.assigneeUI.search = el.value;
+    render();
+    const el2 = document.getElementById('assignee-search-input');
+    if (el2){ el2.focus(); try { el2.setSelectionRange(pos,pos); } catch(e){} }
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-toggle"]').forEach(el=>el.addEventListener('change', ()=>{
+    const id = el.getAttribute('data-userid');
+    if (el.checked) state.assigneeUI.checked.add(id); else state.assigneeUI.checked.delete(id);
+    render();
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-clear"]').forEach(el=>el.addEventListener('click', ()=>{
+    state.assigneeUI.checked = new Set(); render();
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-ai"]').forEach(el=>el.addEventListener('click', ()=>{
+    const ui = state.assigneeUI;
+    const deptId = ui.mode==='bulk' ? state.deptId : ((TASKS.find(t=>t.id===ui.taskId)||{}).deptId);
+    if (!deptId) return;
+    const priority = el.getAttribute('data-priority') || 'media';
+    state.assigneeUI.checked = new Set(suggestAssigneesAI(deptId, priority));
+    render();
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-notify"]').forEach(el=>el.addEventListener('change', ()=>{
+    state.assigneeUI.notify = el.checked;
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-cancel"]').forEach(el=>el.addEventListener('click', ()=>{
+    closeAssigneePicker(); render();
+  }));
+  app.querySelectorAll('[data-action="assignee-picker-apply"]').forEach(el=>el.addEventListener('click', async ()=>{
+    const ui = state.assigneeUI;
+    const ids = [...ui.checked];
+    if (ui.mode==='task'){
+      const task = TASKS.find(t=>t.id===ui.taskId);
+      if (task){
+        const ok = await applyAssigneesToTask(task, ids);
+        if (ok===false) return; // el error ya quedó mostrado por applyAssigneesToTask
+        task.notify = ui.notify;
+      }
+    } else if (ui.mode==='bulk'){
+      const taskIds = [...state.selectedTaskIds];
+      await applyBulkAssignees(taskIds, ids);
+      taskIds.forEach(id=>{ const tk = TASKS.find(x=>x.id===id); if (tk) tk.notify = ui.notify; });
+      state.bulkMenuOpen = null;
+    }
+    closeAssigneePicker();
+    render();
+  }));
+  app.querySelectorAll('[data-action="toggle-assignee-status"]').forEach(el=>el.addEventListener('click', async e=>{
+    e.stopPropagation();
+    const taskId = el.getAttribute('data-taskid');
+    const userIdOrName = el.getAttribute('data-userid');
+    const task = TASKS.find(t=>t.id===taskId);
+    if (!task) return;
+    const list = taskAssigneeList(task);
+    const a = list.find(x => (x.userId && x.userId===userIdOrName) || (!x.userId && x.name===userIdOrName));
+    if (!a) return;
+    await setAssigneeStatus(task, a.userId || a.name, a.status==='completado' ? 'pendiente' : 'completado');
+  }));
+  app.querySelectorAll('[data-action="modal-notify"]').forEach(el=>el.addEventListener('change', ()=>{
+    const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
+    if (task) task.notify = el.checked;
   }));
   app.querySelectorAll('[data-action="modal-priority"]').forEach(el=>el.addEventListener('change', async ()=>{
     const task = TASKS.find(t=>t.id===el.getAttribute('data-taskid'));
@@ -2419,7 +3073,9 @@ function bindEvents(){
       form.title.focus();
       return;
     }
-    const respUser = USERS.find(u=>u.id===form.respId.value);
+    const respIds = Array.from(form.respIds ? form.respIds.selectedOptions : []).map(o=>o.value);
+    const respUsers = respIds.map(id=>USERS.find(u=>u.id===id)).filter(Boolean);
+    const primary = respUsers[0] || null;
     const dueVal = form.due.value || toISODate(addDays(today(),7));
     const noteVal = form.note.value.trim();
     if (isRealSession()){
@@ -2429,15 +3085,18 @@ function bindEvents(){
         const client = getSupabaseClient();
         const { data: newTask, error } = await client.from('tasks').insert({
           dept_id: deptId, title: titleVal, priority: form.priority.value, status: form.status.value,
-          due_date: dueVal, resp_user_id: respUser ? respUser.id : null, assigned_by_user_id: currentUser().id,
+          due_date: dueVal, resp_user_id: primary ? primary.id : null, assigned_by_user_id: currentUser().id,
         }).select().single();
         if (error) throw error;
+        if (respUsers.length) { const { error: aErr } = await client.from('task_assignees').insert(respUsers.map(u=>({ task_id: newTask.id, user_id: u.id }))); if (aErr) throw aErr; }
         if (noteVal) await client.from('task_notes').insert({ task_id: newTask.id, author_id: currentUser().id, text: noteVal });
         TASKS.push({
           id: newTask.id, deptId, title: titleVal, priority: newTask.priority, status: newTask.status,
           dueOffset: 0, dueDateFixed: newTask.due_date,
-          resp: respUser ? respUser.name : '—', cargo: respUser ? (respUser.cargo||null) : null,
+          resp: primary ? primary.name : '—', cargo: primary ? (primary.cargo||null) : null,
           assignedBy: currentUser().name, _respUserId: newTask.resp_user_id, _assignedByUserId: newTask.assigned_by_user_id, _remote:true,
+          notify: false,
+          assignees: respUsers.map(u=>({ userId: u.id, name: u.name, cargo: u.cargo||null, status: 'pendiente' })),
         });
         if (noteVal) TASK_NOTES[newTask.id] = [{ author: currentUser().name, offset:0, text: noteVal, _remote:true }];
         state.newTaskDeptId = null;
@@ -2452,12 +3111,21 @@ function bindEvents(){
     TASKS.push({
       id, deptId, title: titleVal, priority: form.priority.value, status: form.status.value,
       dueOffset: 0, dueDateFixed: dueVal,
-      resp: respUser ? respUser.name : '—', cargo: respUser ? (respUser.cargo || null) : null,
-      assignedBy: currentUser().name
+      resp: primary ? primary.name : '—', cargo: primary ? (primary.cargo || null) : null,
+      assignedBy: currentUser().name, notify: false,
+      assignees: respUsers.map(u=>({ userId: u.id, name: u.name, cargo: u.cargo||null, status: 'pendiente' })),
     });
     if (noteVal) TASK_NOTES[id] = [{ author: currentUser().name, offset:0, text: noteVal }];
     state.newTaskDeptId = null;
     render();
+  }));
+  app.querySelectorAll('[data-action="new-task-ai-assign"]').forEach(el=>el.addEventListener('click', ()=>{
+    const form = el.closest('form');
+    const deptId = el.getAttribute('data-dept');
+    const priority = form && form.priority ? form.priority.value : 'media';
+    const ids = suggestAssigneesAI(deptId, priority);
+    const select = document.getElementById('new-task-resp-ids');
+    if (select) Array.from(select.options).forEach(o=>{ o.selected = ids.includes(o.value); });
   }));
 
   app.querySelectorAll('[data-action="add-drive-link"]').forEach(form=>form.addEventListener('submit', async e=>{
@@ -2878,6 +3546,30 @@ function toggleTheme(){
   html.setAttribute('data-theme', isDark ? 'light' : 'dark');
   render();
 }
+
+/* =========================================================
+   DETECCIÓN DEL ENLACE DE "RESTABLECER CONTRASEÑA"
+   ---------------------------------------------------------
+   Cuando alguien hace clic en el enlace que llega por correo, Supabase
+   redirige de vuelta a esta misma página con datos de sesión temporal en
+   la URL y dispara el evento "PASSWORD_RECOVERY". Lo escuchamos para
+   mostrar la pantalla de "elige tu nueva contraseña" en vez del login
+   normal — sin esto, la persona llegaría aquí y no vería ninguna forma
+   de completar el restablecimiento.
+   ========================================================= */
+(function initAuthRecoveryListener(){
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    client.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        state.recoveryMode = true;
+        state.authed = false; // por si ya había una sesión previa en memoria, prioriza el restablecimiento
+        render();
+      }
+    });
+  } catch (e) { /* si el cliente aún no está listo, simplemente no se detecta el enlace */ }
+})();
 
 render();
 </script>

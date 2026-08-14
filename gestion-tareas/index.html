@@ -1038,7 +1038,13 @@ function userAvatarColor(user){ const d = dept(user.deptId); return d ? d.color 
 function usersInDept(deptId){ return USERS.filter(u=>u.deptId===deptId); }
 function assignableUsers(deptId){
   const seen = new Set();
-  return [...usersInDept(deptId), ...leadershipUsers()].filter(u=>{ if (seen.has(u.id) || u.status==='inactivo') return false; seen.add(u.id); return true; });
+  // Dirección/Gerencia coordinan entre departamentos, así que como admin pueden asignar
+  // a cualquier persona de la escuela (por ejemplo, un/a coordinador/a de otro departamento
+  // apoyando una tarea de Coordinación) — no solo a quienes ya pertenecen a este departamento.
+  // El resto del personal (coordinador/colaborador) sigue viendo solo su propio departamento
+  // más Dirección/Gerencia, como antes.
+  const pool = isLeadership() ? USERS : [...usersInDept(deptId), ...leadershipUsers()];
+  return pool.filter(u=>{ if (seen.has(u.id) || u.status==='inactivo') return false; seen.add(u.id); return true; });
 }
 
 /* =========================================================

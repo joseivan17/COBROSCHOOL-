@@ -343,7 +343,24 @@
   .login-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 32px 30px; width: 100%; max-width: 380px; }
   .login-card .field { display: flex; flex-direction: column; gap: 5px; }
   .login-card .field label { font-size: 11px; color: var(--text-muted); }
-  .login-card input[type=email] { padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-primary); font-size: 13px; width: 100%; }
+  .login-card input[type=email], .login-card .pw-wrap input { padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-primary); font-size: 13px; width: 100%; }
+  .pw-wrap { position: relative; display: block; width: 100%; }
+  .pw-wrap input { padding-right: 40px !important; box-sizing: border-box; }
+  .pw-toggle { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 5px 6px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
+  .pw-toggle:hover { color: var(--text-primary); background: var(--surface-3, rgba(128,128,128,.12)); }
+  .pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .search-box { position: relative; display: inline-flex; align-items: center; }
+  .search-box > svg.icon { position: absolute; left: 9px; color: var(--text-muted); pointer-events: none; }
+  .search-box input { padding: 7px 28px 7px 28px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-primary); font-size: 12.5px; min-width: 220px; box-sizing: border-box; }
+  .search-box.block { display: flex; width: 100%; margin-bottom: 10px; }
+  .search-box.block input { width: 100%; }
+  .search-box .search-clear { position: absolute; right: 5px; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 3px; border-radius: 6px; display: inline-flex; }
+  .search-box .search-clear:hover { color: var(--text-primary); }
+  .search-meta { font-size: 11.5px; color: var(--text-muted); margin: -4px 0 8px; }
+  .checklist-item .item-btn { border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 3px; border-radius: 6px; display: inline-flex; }
+  .checklist-item .item-btn:hover { color: var(--text-primary); }
+  .checklist-edit-row { display: flex; gap: 6px; align-items: center; flex: 1; }
+  .checklist-edit-row input { flex: 1; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--accent); background: var(--surface-2); color: var(--text-primary); font-size: 12.5px; }
   .badge.status-inactivo { background: var(--status-bg-warning); color: #a67405; }
 
   @media (max-width: 900px) {
@@ -677,6 +694,9 @@ const ICON_PATHS = {
   filePresentation: '<path d="M6.5 3H14l4.5 4.5V21H6.5z"/><path d="M14 3v4.5h4.5"/><path d="M9 12.2h6l-6 5v-5z"/>',
   link: '<path d="M9.5 14.5 14.5 9.5"/><path d="M11 6.5 12.7 4.8a3.6 3.6 0 1 1 5 5L16 11.5"/><path d="M13 17.5 11.3 19.2a3.6 3.6 0 1 1-5-5L8 12.5"/>',
   x: '<path d="M5 5l14 14M19 5 5 19"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M2 12s3.6-7 10-7c2.1 0 3.9.7 5.4 1.7M22 12s-3.6 7-10 7c-2.1 0-3.9-.7-5.4-1.7"/><path d="M9.9 9.9A3 3 0 0 0 14.1 14.1"/><path d="M3 3l18 18"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V4.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V7"/><path d="M6.5 7l.9 12.2a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8L17.5 7"/><path d="M10.2 11v6M13.8 11v6"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
@@ -978,6 +998,9 @@ const state = {
   deptId: null,
   deptSubview: 'kanban',  // kanban | list
   filters: { resp:'all', status:'all', priority:'all' },
+  taskSearch: '',               // búsqueda en "Lista de tareas"
+  checklistSearch: { dept:'', personal:'' }, // búsqueda en los checklists
+  checklistEdit: null,          // { scope:'dept'|'personal', idx } mientras se edita un elemento
   calMonth: (()=>{ const d=today(); return new Date(d.getFullYear(), d.getMonth(), 1); })(),
   calSelected: null,
   currentUserId: 'u-admin',
@@ -1419,11 +1442,11 @@ function renderLogin(){
         </div>
         <div class="field" style="margin-bottom:12px;">
           <label>Contraseña</label>
-          <input type="password" name="password" placeholder="Mínimo 6 caracteres" ${state.loginBusy?'disabled':''}>
+          <div class="pw-wrap"><input type="password" name="password" placeholder="Mínimo 6 caracteres" ${state.loginBusy?'disabled':''}><button type="button" class="pw-toggle" data-action="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye',{size:16})}</button></div>
         </div>
         <div class="field" style="margin-bottom:14px;">
           <label>Confirmar contraseña</label>
-          <input type="password" name="password2" placeholder="••••••••" ${state.loginBusy?'disabled':''}>
+          <div class="pw-wrap"><input type="password" name="password2" placeholder="••••••••" ${state.loginBusy?'disabled':''}><button type="button" class="pw-toggle" data-action="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye',{size:16})}</button></div>
         </div>
         <button type="submit" class="btn primary" style="width:100%;justify-content:center;" ${state.loginBusy?'disabled':''}>${icon('login',{size:15})} ${state.loginBusy?'Creando cuenta…':'Crear cuenta'}</button>
       </form>
@@ -1447,7 +1470,7 @@ function renderLogin(){
         </div>
         <div class="field" style="margin-bottom:8px;">
           <label>Contraseña</label>
-          <input type="password" name="password" placeholder="••••••••" ${state.loginBusy?'disabled':''}>
+          <div class="pw-wrap"><input type="password" name="password" placeholder="••••••••" ${state.loginBusy?'disabled':''}><button type="button" class="pw-toggle" data-action="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye',{size:16})}</button></div>
         </div>
         <div style="text-align:right;margin-bottom:14px;">
           <a href="#" data-action="login-forgot-password" style="color:var(--accent);font-size:11.5px;">¿Olvidaste tu contraseña?</a>
@@ -1479,18 +1502,29 @@ function renderPasswordRecoveryScreen(){
       <form data-action="reset-password-confirm">
         <div class="field" style="margin-bottom:12px;">
           <label>Nueva contraseña</label>
-          <input type="password" name="password" placeholder="Mínimo 6 caracteres" autofocus ${state.recoveryBusy?'disabled':''}>
+          <div class="pw-wrap"><input type="password" name="password" placeholder="Mínimo 6 caracteres" autofocus ${state.recoveryBusy?'disabled':''}><button type="button" class="pw-toggle" data-action="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye',{size:16})}</button></div>
         </div>
         <div class="field" style="margin-bottom:14px;">
           <label>Confirmar nueva contraseña</label>
-          <input type="password" name="password2" placeholder="••••••••" ${state.recoveryBusy?'disabled':''}>
+          <div class="pw-wrap"><input type="password" name="password2" placeholder="••••••••" ${state.recoveryBusy?'disabled':''}><button type="button" class="pw-toggle" data-action="toggle-password" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye',{size:16})}</button></div>
         </div>
         <button type="submit" class="btn primary" style="width:100%;justify-content:center;" ${state.recoveryBusy?'disabled':''}>${icon('login',{size:15})} ${state.recoveryBusy?'Guardando…':'Guardar nueva contraseña'}</button>
       </form>
     </div>
   </div>`;
 }
+function togglePasswordField(btn){
+  const input = btn.parentElement.querySelector('input');
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.innerHTML = icon(show ? 'eyeOff' : 'eye', {size:16});
+  const label = show ? 'Ocultar contraseña' : 'Mostrar contraseña';
+  btn.setAttribute('aria-label', label); btn.setAttribute('title', label);
+  btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+}
 function bindLoginEvents(){
+  document.querySelectorAll('#app [data-action="toggle-password"]').forEach(el=>el.addEventListener('click', ()=> togglePasswordField(el)));
   const app = document.getElementById('app');
   app.querySelectorAll('[data-action="login-submit"]').forEach(form=>form.addEventListener('submit', async e=>{
     e.preventDefault();
@@ -1873,6 +1907,71 @@ function renderDashboard(){
   </div>`;
 }
 
+
+/* =========================================================
+   BÚSQUEDA / EDICIÓN EN CHECKLISTS Y BÚSQUEDA EN LISTA DE TAREAS
+   ========================================================= */
+function escHtml(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function normSearch(s){ return normalizeHeaderText(s); }
+
+function renderSearchBox(id, action, value, placeholder, extraAttrs, block){
+  const has = !!value;
+  return `<div class="search-box ${block?'block':''}">
+    ${icon('search',{size:14})}
+    <input type="text" id="${id}" data-action="${action}" ${extraAttrs||''} placeholder="${placeholder}" value="${escHtml(value)}" autocomplete="off">
+    ${has ? `<button type="button" class="search-clear" data-action="${action}-clear" ${extraAttrs||''} title="Limpiar búsqueda" aria-label="Limpiar búsqueda">${icon('x',{size:12})}</button>` : ''}
+  </div>`;
+}
+
+// scope: 'dept' | 'personal'. items = arreglo COMPLETO (los índices originales se conservan al filtrar).
+function renderChecklistItems(items, scope, emptyMsg){
+  const q = normSearch(state.checklistSearch[scope]);
+  const rows = items.map((it,i)=>({it,i})).filter(r => !q || normSearch(r.it.t).includes(q));
+  const idp = scope==='dept' ? 'cl' : 'pcl';
+  const tgl = scope==='dept' ? 'toggle-checklist' : 'toggle-personal';
+  const rem = scope==='dept' ? 'remove-checklist-item' : 'remove-personal-item';
+  const editing = state.checklistEdit && state.checklistEdit.scope===scope ? state.checklistEdit.idx : -1;
+  const searchBar = items.length>0 ? renderSearchBox('checklist-search-'+scope, 'checklist-search', state.checklistSearch[scope], 'Buscar en el checklist…', `data-scope="${scope}"`, true) : '';
+  const meta = (q && items.length>0) ? `<div class="search-meta">${rows.length} de ${items.length} elemento(s)</div>` : '';
+  const body = rows.map(({it,i})=> i===editing ? `<div class="checklist-item" style="display:flex;align-items:center;gap:8px;">
+        <form class="checklist-edit-row" data-action="save-checklist-edit" data-scope="${scope}" data-idx="${i}">
+          <input type="text" name="item" id="checklist-edit-input" value="${escHtml(it.t)}" required>
+          <button type="submit" class="btn primary" title="Guardar cambios">${icon('check',{size:13})} Guardar</button>
+          <button type="button" class="btn" data-action="cancel-checklist-edit" title="Cancelar">${icon('x',{size:12})}</button>
+        </form>
+      </div>` : `<div class="checklist-item ${it.done?'done':''}" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="${idp}-${i}" ${it.done?'checked':''} data-action="${tgl}" data-idx="${i}">
+        <label for="${idp}-${i}" style="flex:1;">${escHtml(it.t)}</label>
+        <button class="item-btn" type="button" data-action="edit-checklist-item" data-scope="${scope}" data-idx="${i}" title="Editar elemento" aria-label="Editar elemento">${icon('edit',{size:13})}</button>
+        <button class="remove item-btn" type="button" data-action="${rem}" data-idx="${i}" title="Eliminar" aria-label="Eliminar">${icon('x',{size:13})}</button>
+      </div>`).join('');
+  let tail = '';
+  if (items.length===0) tail = `<div class="form-hint">${emptyMsg}</div>`;
+  else if (rows.length===0) tail = `<div class="form-hint">No hay elementos que coincidan con «${escHtml(state.checklistSearch[scope])}».</div>`;
+  return searchBar + meta + body + tail;
+}
+
+function taskMatchesFilters(t){
+  const f = state.filters;
+  if (!(f.resp==='all'||taskAssigneeList(t).some(a=>a.name===f.resp))) return false;
+  if (!(f.status==='all'||t.status===f.status)) return false;
+  if (!(f.priority==='all'||t.priority===f.priority)) return false;
+  const q = normSearch(state.taskSearch);
+  if (q){
+    const hay = normSearch([t.title, taskAssigneeList(t).map(a=>a.name).join(' '), STATUS_LABELS[t.status], PRIORITY_LABELS[t.priority]].join(' '));
+    if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+  }
+  return true;
+}
+
+function focusEnd(id){
+  const el = document.getElementById(id);
+  if (el){ el.focus(); try { const p = el.value.length; el.setSelectionRange(p,p); } catch(e){} }
+  return el;
+}
+
 /* =========================================================
    RENDER: DEPARTAMENTO
    ========================================================= */
@@ -1905,12 +2004,7 @@ function renderDepartment(){
       <div class="checklist-head"><span class="title">${icon('clipboard',{size:15})} ${checklist.title}</span><span class="pct" style="color:${semaphoreColor(st.clPct)}">${st.clPct}%</span></div>
       ${state.checklistError ? `<div class="invite-error" style="margin-bottom:8px;">${icon('alertTriangle',{size:14})} ${state.checklistError}</div>` : ''}
       <div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${st.clPct}%;background:${semaphoreColor(st.clPct)}"></div></div>
-      ${checklist.items.map((it,i)=>`<div class="checklist-item ${it.done?'done':''}" style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" id="cl-${i}" ${it.done?'checked':''} data-action="toggle-checklist" data-idx="${i}">
-        <label for="cl-${i}" style="flex:1;">${it.t}</label>
-        <button class="remove" data-action="remove-checklist-item" data-idx="${i}" title="Eliminar del checklist" style="border:none;background:none;color:var(--text-muted);cursor:pointer;">${icon('x',{size:13})}</button>
-      </div>`).join('')}
-      ${checklist.items.length===0 ? '<div class="form-hint">Sin elementos en este checklist.</div>' : ''}
+      ${renderChecklistItems(checklist.items, 'dept', 'Sin elementos en este checklist.')}
       <form class="checklist-add-row" data-action="add-checklist-item" style="margin-top:10px;">
         <input type="text" name="item" placeholder="Agregar un elemento al checklist del departamento…" required>
         <button type="submit" class="btn">+ Agregar</button>
@@ -1929,6 +2023,7 @@ function renderDepartment(){
       <button class="btn" data-action="export-template" data-dept="${d.id}">${icon('fileSheet',{size:13,cls:'att-excel'})} Exportar plantilla (Excel)</button>
       <label class="btn" style="cursor:pointer;">${icon('fileSheet',{size:13,cls:'att-excel'})} Importar plantilla (Excel)<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;" data-action="import-template" data-dept="${d.id}"></label>
       ${state.deptSubview==='list' ? `
+      ${renderSearchBox('task-search-input','task-search',state.taskSearch,'Buscar tarea o responsable…','',false)}
       <select data-action="filter" data-filter="resp"><option value="all">Todos los responsables</option>${responsables.map(r=>`<option value="${r}" ${state.filters.resp===r?'selected':''}>${r}</option>`).join('')}</select>
       <select data-action="filter" data-filter="status"><option value="all">Todos los estados</option>${STATUS_ORDER.map(s=>`<option value="${s}" ${state.filters.status===s?'selected':''}>${STATUS_LABELS[s]}</option>`).join('')}</select>
       <select data-action="filter" data-filter="priority"><option value="all">Toda prioridad</option>${Object.keys(PRIORITY_LABELS).map(p=>`<option value="${p}" ${state.filters.priority===p?'selected':''}>${PRIORITY_LABELS[p]}</option>`).join('')}</select>
@@ -1975,14 +2070,9 @@ function renderTaskCard(t){
 }
 
 function renderTaskList(d, tasks){
-  const f = state.filters;
-  const filtered = tasks.filter(t =>
-    (f.resp==='all'||taskAssigneeList(t).some(a=>a.name===f.resp)) &&
-    (f.status==='all'||t.status===f.status) &&
-    (f.priority==='all'||t.priority===f.priority)
-  ).sort((a,b)=> dueDate(a)-dueDate(b));
+  const filtered = tasks.filter(taskMatchesFilters).sort((a,b)=> dueDate(a)-dueDate(b));
 
-  if (filtered.length===0) return `<div class="panel"><div class="empty-state">No hay tareas que coincidan con los filtros seleccionados.</div></div>`;
+  if (filtered.length===0) return `<div class="panel"><div class="empty-state">${state.taskSearch.trim() ? 'No hay tareas que coincidan con «'+escHtml(state.taskSearch.trim())+'» y los filtros seleccionados.' : 'No hay tareas que coincidan con los filtros seleccionados.'}</div></div>`;
 
   const allSelected = filtered.length>0 && filtered.every(t=>state.selectedTaskIds.has(t.id));
 
@@ -2686,12 +2776,7 @@ function renderMyTasks(){
       <div class="checklist-head"><span class="title">${icon('clipboard',{size:15})} Pendientes personales</span><span class="pct" style="color:${semaphoreColor(clPct)}">${checklist.length? clPct+'%' : '—'}</span></div>
       ${state.checklistError ? `<div class="invite-error" style="margin-bottom:8px;">${icon('alertTriangle',{size:14})} ${state.checklistError}</div>` : ''}
       ${checklist.length>0 ? `<div class="progress-track" style="margin-bottom:10px;"><div class="progress-fill" style="width:${clPct}%;background:${semaphoreColor(clPct)}"></div></div>` : ''}
-      ${checklist.map((it,i)=>`<div class="checklist-item ${it.done?'done':''}" style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" id="pcl-${i}" ${it.done?'checked':''} data-action="toggle-personal" data-idx="${i}">
-        <label for="pcl-${i}" style="flex:1;">${it.t}</label>
-        <button class="remove" data-action="remove-personal-item" data-idx="${i}" title="Eliminar pendiente" style="border:none;background:none;color:var(--text-muted);cursor:pointer;">${icon('x',{size:13})}</button>
-      </div>`).join('')}
-      ${checklist.length===0 ? '<div class="form-hint">Aún no agregas pendientes personales.</div>' : ''}
+      ${renderChecklistItems(checklist, 'personal', 'Aún no agregas pendientes personales.')}
       <form class="checklist-add-row" data-action="add-personal-item">
         <input type="text" name="item" placeholder="Agregar un pendiente personal…" required>
         <button type="submit" class="btn">+ Agregar</button>
@@ -2718,6 +2803,7 @@ function bindEvents(){
   app.querySelectorAll('[data-action="open-dept"]').forEach(el=>el.addEventListener('click',()=>{
     state.view='department'; state.deptId=el.getAttribute('data-dept'); state.deptSubview='kanban';
     state.filters={resp:'all',status:'all',priority:'all'}; state.checklistError=null;
+    state.taskSearch=''; state.checklistSearch.dept=''; state.checklistEdit=null;
     state.selectedTaskIds=new Set(); state.bulkMenuOpen=null; state.templateError=null; state.templateBanner=null; closeAssigneePicker();
     render();
     if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
@@ -2780,6 +2866,73 @@ function bindEvents(){
     CHECKLISTS[state.deptId].items.push({ t: text, done: false });
     render();
   }));
+
+  // ---- Búsqueda en checklists ----
+  app.querySelectorAll('[data-action="checklist-search"]').forEach(el=>el.addEventListener('input', ()=>{
+    const scope = el.getAttribute('data-scope');
+    const pos = el.selectionStart;
+    state.checklistSearch[scope] = el.value;
+    render();
+    const el2 = document.getElementById('checklist-search-'+scope);
+    if (el2){ el2.focus(); try { el2.setSelectionRange(pos,pos); } catch(e){} }
+  }));
+  app.querySelectorAll('[data-action="checklist-search-clear"]').forEach(el=>el.addEventListener('click', ()=>{
+    const scope = el.getAttribute('data-scope');
+    state.checklistSearch[scope] = '';
+    render();
+    const el2 = document.getElementById('checklist-search-'+scope); if (el2) el2.focus();
+  }));
+  // ---- Búsqueda en lista de tareas ----
+  app.querySelectorAll('[data-action="task-search"]').forEach(el=>el.addEventListener('input', ()=>{
+    const pos = el.selectionStart;
+    state.taskSearch = el.value;
+    render();
+    const el2 = document.getElementById('task-search-input');
+    if (el2){ el2.focus(); try { el2.setSelectionRange(pos,pos); } catch(e){} }
+  }));
+  app.querySelectorAll('[data-action="task-search-clear"]').forEach(el=>el.addEventListener('click', ()=>{
+    state.taskSearch = '';
+    render();
+    const el2 = document.getElementById('task-search-input'); if (el2) el2.focus();
+  }));
+  // ---- Edición de elementos de checklist ----
+  app.querySelectorAll('[data-action="edit-checklist-item"]').forEach(el=>el.addEventListener('click', ()=>{
+    state.checklistEdit = { scope: el.getAttribute('data-scope'), idx: parseInt(el.getAttribute('data-idx'),10) };
+    state.checklistError = null;
+    render();
+    const inp = document.getElementById('checklist-edit-input');
+    if (inp){ inp.focus(); try { inp.select(); } catch(e){} }
+  }));
+  app.querySelectorAll('[data-action="cancel-checklist-edit"]').forEach(el=>el.addEventListener('click', ()=>{
+    state.checklistEdit = null; render();
+  }));
+  app.querySelectorAll('.checklist-edit-row input').forEach(inp=>inp.addEventListener('keydown', e=>{
+    if (e.key==='Escape'){ e.preventDefault(); state.checklistEdit = null; render(); }
+  }));
+  app.querySelectorAll('[data-action="save-checklist-edit"]').forEach(form=>form.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const scope = form.getAttribute('data-scope');
+    const idx = parseInt(form.getAttribute('data-idx'),10);
+    const list = scope==='dept' ? CHECKLISTS[state.deptId].items : (PERSONAL_CHECKLISTS[currentUser().id] || []);
+    const item = list[idx];
+    const text = form.item.value.trim();
+    if (!item){ state.checklistEdit = null; render(); return; }
+    if (!text){ showFormError(form, 'El texto no puede quedar vacío.'); return; }
+    if (text === item.t){ state.checklistEdit = null; render(); return; }
+    if (isRealSession() && item._id){
+      const client = getSupabaseClient();
+      const table = scope==='dept' ? 'dept_checklist_items' : 'personal_checklist_items';
+      try {
+        const { error } = await client.from(table).update({ text }).eq('id', item._id);
+        if (error) throw error;
+        item.t = text; state.checklistEdit = null; state.checklistError = null; render();
+      } catch (err) { showFormError(form, friendlySupabaseError(err)); }
+      return;
+    }
+    item.t = text; state.checklistEdit = null; render();
+  }));
+  // ---- Mostrar / ocultar contraseña ----
+  app.querySelectorAll('[data-action="toggle-password"]').forEach(el=>el.addEventListener('click', ()=> togglePasswordField(el)));
   app.querySelectorAll('[data-action="toggle-theme"]').forEach(el=>el.addEventListener('click', toggleTheme));
 
   // Calendar nav
@@ -2834,12 +2987,7 @@ function bindEvents(){
   app.querySelectorAll('[data-action="select-all-tasks"]').forEach(el=>{
     el.addEventListener('click', e=> e.stopPropagation());
     el.addEventListener('change', ()=>{
-      const f = state.filters;
-      const filtered = TASKS.filter(t=>t.deptId===state.deptId).filter(t =>
-        (f.resp==='all'||taskAssigneeList(t).some(a=>a.name===f.resp)) &&
-        (f.status==='all'||t.status===f.status) &&
-        (f.priority==='all'||t.priority===f.priority)
-      );
+      const filtered = TASKS.filter(t=>t.deptId===state.deptId).filter(taskMatchesFilters);
       if (el.checked) filtered.forEach(t=>state.selectedTaskIds.add(t.id));
       else filtered.forEach(t=>state.selectedTaskIds.delete(t.id));
       render();
@@ -2961,7 +3109,7 @@ function bindEvents(){
     if (isRealSession() && !state.remote.users && !state.remote.loading) loadRemoteUsersModule();
   }));
   app.querySelectorAll('[data-action="open-mytasks"]').forEach(el=>el.addEventListener('click',()=>{
-    state.view='mytasks'; render();
+    state.view='mytasks'; state.checklistEdit=null; state.checklistError=null; render();
     if (isRealSession() && !state.remoteTasks.loaded && !state.remoteTasks.loading) loadRemoteTasksModule();
   }));
   app.querySelectorAll('[data-action="open-settings"]').forEach(el=>el.addEventListener('click',()=>{

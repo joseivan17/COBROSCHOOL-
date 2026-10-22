@@ -283,6 +283,9 @@ const SUPABASE_DEFAULT_URL = 'https://rpxjysxherdvfmfmqqjr.supabase.co';
 const SUPABASE_DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJweGp5c3hoZXJkdmZtZm1xcWpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDg4NjcsImV4cCI6MjA5OTUyNDg2N30.SmseoiVK6eZuS5b0F6w-PkJLBHQ2pImCFqTDas0G2BE';
 let SUPABASE_URL = null;
 let SUPABASE_ANON_KEY = null;
+// Token de sesión emitido por la Edge Function kv-proxy al iniciar sesión. Mientras no exista,
+// la Edge Function rechaza cualquier lectura/escritura de datos de negocio (ver kv-proxy/index.ts).
+let SESSION_TOKEN = null;
 
 async function cargarConfigSupabase(){
   let cfg = null;
@@ -317,8 +320,10 @@ async function borrarConfigSupabase(){
   try{ localStorage.setItem('ccc_local:ccc:supabase_config', JSON.stringify(marcador)); }catch(e){}
 }
 
-/* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
-   para no depender de un CDN fuera de lo permitido en este entorno. ---------- */
+/* ---------- Supabase: ya NO se habla directo con /rest/v1/kv_store (eso es lo
+   que dejaba todos los datos abiertos a cualquiera con la anon key). Todo pasa
+   ahora por la Edge Function kv-proxy, que corre con la service_role key en el
+   servidor y exige una sesión válida antes de entregar o aceptar datos. ---------- */
 // Tiempo máximo de espera para cualquier llamada a Supabase. Sin esto, una red lenta o que
 // bloquee la conexión en silencio podía dejar el arranque de la app esperando indefinidamente.
 const SUPABASE_TIMEOUT_MS = 7000;
@@ -327,25 +332,39 @@ function fetchConTimeout(url, options){
   const timer = setTimeout(()=> controller.abort(), SUPABASE_TIMEOUT_MS);
   return fetch(url, { ...(options||{}), signal: controller.signal }).finally(()=> clearTimeout(timer));
 }
-async function supabaseFetch(path, options){
-  options = options || {};
-  return fetchConTimeout(SUPABASE_URL + path, {
-    ...options,
+async function kvProxyLlamar(body, { base, key } = {}){
+  const url = (base || SUPABASE_URL) + '/functions/v1/kv-proxy';
+  const apiKey = key || SUPABASE_ANON_KEY;
+  const res = await fetchConTimeout(url, {
+    method: 'POST',
     headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: 'Bearer ' + SUPABASE_ANON_KEY,
+      apikey: apiKey,
+      Authorization: 'Bearer ' + apiKey,
       'Content-Type': 'application/json',
-      ...(options.headers||{})
-    }
+      ...(SESSION_TOKEN ? { 'x-session-token': SESSION_TOKEN } : {})
+    },
+    body: JSON.stringify(body)
   });
+  let data = null;
+  try{ data = await res.json(); }catch(e){ /* respuesta no era JSON */ }
+  if (!res.ok){
+    const err = new Error((data && data.error) ? data.error : ('kv-proxy falló (código ' + res.status + ')'));
+    err.status = res.status;
+    throw err;
+  }
+  return data || {};
 }
 async function supabaseProbar(url, key){
   const base = normalizarSupabaseUrl(url);
   if (!base || !key) return { ok:false, error:'Complete el Project URL y la anon key.' };
   try{
-    const res = await fetchConTimeout(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
+    const res = await fetchConTimeout(base + '/functions/v1/kv-proxy', {
+      method: 'POST',
+      headers: { apikey:key, Authorization:'Bearer '+key, 'Content-Type':'application/json' },
+      body: JSON.stringify({ action:'ping' })
+    });
     if (res.status === 200) return { ok:true };
-    if (res.status === 404 || res.status === 400) return { ok:false, error:'No se encontró la tabla "kv_store". Verifique que ejecutó el script SQL en su proyecto de Supabase (ver ARQUITECTURA_Y_ESCALABILIDAD.md).' };
+    if (res.status === 404) return { ok:false, error:'No se encontró la función "kv-proxy". Verifique que la desplegó en su proyecto de Supabase (ver LEEME_ESTA_ENTREGA.md).' };
     if (res.status === 401 || res.status === 403) return { ok:false, error:'Credenciales rechazadas (código '+res.status+'). Verifique el Project URL y la anon key.' };
     return { ok:false, error:'Respuesta inesperada del servidor (código ' + res.status + ').' };
   }catch(e){
@@ -354,18 +373,37 @@ async function supabaseProbar(url, key){
   }
 }
 async function supabaseGet(key){
-  const res = await supabaseFetch('/rest/v1/kv_store?key=eq.' + encodeURIComponent(key) + '&select=value', { method:'GET' });
-  if (!res.ok) throw new Error('Supabase GET falló (código ' + res.status + ')');
-  const rows = await res.json();
-  return (rows && rows[0] && rows[0].value !== undefined) ? rows[0].value : null;
+  const data = await kvProxyLlamar({ action:'get', key });
+  return (data.value !== undefined) ? data.value : null;
 }
 async function supabaseSet(key, value){
-  const res = await supabaseFetch('/rest/v1/kv_store', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
-  });
-  if (!res.ok) throw new Error('Supabase SET falló (código ' + res.status + ')');
+  await kvProxyLlamar({ action:'set', key, value });
+}
+// --- Acciones de autenticación: ahora corren en el servidor (kv-proxy), no en el navegador. ---
+async function kvConsultarEstadoUsuarios(){
+  const data = await kvProxyLlamar({ action:'estado' });
+  return !!data.hayUsuarios;
+}
+async function kvSetupAdmin(nombre, correo, pass, pregunta, respuesta){
+  return await kvProxyLlamar({ action:'setup-admin', nombre, correo, pass, pregunta, respuesta });
+}
+async function kvLogin(correo, password){
+  return await kvProxyLlamar({ action:'login', correo, password });
+}
+async function kvRecuperarPregunta(correo){
+  return await kvProxyLlamar({ action:'recuperar-pregunta', correo });
+}
+async function kvVerificarRespuesta(correo, respuesta){
+  return await kvProxyLlamar({ action:'verificar-respuesta', correo, respuesta });
+}
+async function kvResetearPassword(correo, resetToken, nuevaPassword){
+  return await kvProxyLlamar({ action:'resetear-password', correo, resetToken, nuevaPassword });
+}
+async function kvLogout(){
+  try{ await kvProxyLlamar({ action:'logout' }); }catch(e){ /* no crítico */ }
+}
+async function kvMigrarUsuariosLocales(usuarios, comoCorreo){
+  return await kvProxyLlamar({ action:'migrar-usuarios', usuarios, comoCorreo });
 }
 
 // Hash simple en JS puro (sin depender de crypto.subtle, que no siempre está
@@ -462,11 +500,12 @@ async function verificarAlmacenamiento(){
   if (SUPABASE_URL && SUPABASE_ANON_KEY){
     STORAGE_DIAG.supabaseIntentado = true;
     try{
-      await supabaseSet(testKey, testVal);
-      const back = await supabaseGet(testKey);
-      const ok = !!(back && back.r === testVal.r);
-      STORAGE_DIAG.supabaseFunciona = ok;
-      if (ok){ STORAGE_MODE = 'supabase'; return; }
+      // Antes de iniciar sesión no hay token todavía, así que la prueba de conectividad
+      // usa la acción "ping" (no toca datos de negocio) en vez de leer/escribir una llave real.
+      await kvProxyLlamar({ action:'ping' });
+      STORAGE_DIAG.supabaseFunciona = true;
+      STORAGE_MODE = 'supabase';
+      return;
     }catch(e){ STORAGE_DIAG.detalle = 'Supabase: ' + (e && e.message || e); }
   }
 
@@ -565,12 +604,27 @@ async function dbSet(key, value){
 async function loadAll(){
   await cargarConfigSupabase();
   await verificarAlmacenamiento();
+  if (STORAGE_MODE === 'supabase'){
+    // En modo Supabase, kv-proxy ya no entrega NINGÚN dato de negocio (ni siquiera la lista de
+    // usuarios) sin un token de sesión válido — y ese token no existe todavía antes de iniciar
+    // sesión. Antes solo necesitamos saber si ya existe alguna cuenta, para decidir si se muestra
+    // "Configuración inicial" o la pantalla de acceso; el resto se carga recién tras el login
+    // (ver los puntos donde se llama a recargarDatosDeNegocio() en la autenticación, más abajo).
+    DB.usuarios = [];
+    try{ DB._hayUsuariosSupabase = await kvConsultarEstadoUsuarios(); }
+    catch(e){ DB._hayUsuariosSupabase = null; /* no se pudo determinar; se trata como "sí hay" para no reofrecer crear un admin por error */ }
+    return;
+  }
   await recargarDatosDeNegocio();
+  await sembrarDatosDeMuestraSiEsNecesario();
+}
+async function sembrarDatosDeMuestraSiEsNecesario(){
   const yaSeSembro = await dbGet('ccc:seeded', false);
   if (!yaSeSembro && DB.familias.length === 0 && DB.estudiantes.length === 0){
     seedSampleData();
-    // Se usa dbSet directo (no save*) porque esta siembra ocurre antes de cualquier inicio de sesión;
-    // el guardia de autenticación bloquearía estos guardados si pasaran por saveFamilias/saveEstudiantes/etc.
+    // Se usa dbSet directo (no save*) porque esta siembra puede ocurrir antes de cualquier guardia
+    // de sesión adicional de la pantalla actual; el guardia de autenticación (requireAuth) bloquearía
+    // estos guardados si pasaran por saveFamilias/saveEstudiantes/etc.
     await dbSet('ccc:familias', DB.familias);
     await dbSet('ccc:estudiantes', DB.estudiantes);
     await dbSet('ccc:cuentas', DB.cuentas);
@@ -597,8 +651,15 @@ async function recargarDatosDeNegocio(){
   let migrated = false;
   for (const u of DB.usuarios){
     if (!u.correo){ u.correo = (u.nombre||'usuario').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'') + '@sunegocio.com'; migrated = true; }
-    if (!u.passwordHash){ u.passwordHash = await hashText('cambiar123'); migrated = true; }
-    if (!u.pregunta){ u.pregunta = '¿Cuál es su color favorito?'; u.respuestaHash = await hashText('azul'); migrated = true; }
+    if (STORAGE_MODE !== 'supabase'){
+      if (!u.passwordHash){ u.passwordHash = await hashText('cambiar123'); migrated = true; }
+      if (!u.pregunta){ u.pregunta = '¿Cuál es su color favorito?'; u.respuestaHash = await hashText('azul'); migrated = true; }
+    } else if (!u.pregunta){
+      // En modo Supabase, kv-proxy ya no envía passwordHash/respuestaHash al navegador a propósito
+      // (ver kv-proxy/index.ts); completarlos aquí con valores inventados borraría las contraseñas
+      // reales de todo el mundo en el próximo guardado. Solo se completa la pregunta visible.
+      u.pregunta = '¿Cuál es su color favorito?'; migrated = true;
+    }
     if (u.intentosFallidos === undefined){ u.intentosFallidos = 0; migrated = true; }
     if (u.bloqueadoHasta === undefined){ u.bloqueadoHasta = null; migrated = true; }
     if (!u.ultimoAcceso){ u.ultimoAcceso = null; migrated = true; }
@@ -716,7 +777,7 @@ const PERMS = {
 // un cambio y no ves esta fecha reflejada en la app (arriba a la derecha, o en la pantalla de
 // inicio de sesión), significa que tu navegador o GitHub Pages todavía están sirviendo la
 // versión anterior en caché — no que el cambio no se haya guardado.
-const APP_VERSION = '2026-07-30.5';
+const APP_VERSION = '2026-10-22.6-fix-seguridad';
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
 
@@ -2594,7 +2655,7 @@ function renderBaseDeDatos(root){
       Conectar un proyecto de <b>Supabase</b> (gratis) le da a este sistema una base de datos real compartida entre
       todos los dispositivos, con guardado seguro y verificado. Es opcional — si no lo configura, la app sigue
       funcionando con Nube de Claude.ai / IndexedDB / localStorage como hasta ahora.
-      Vea <b>ARQUITECTURA_Y_ESCALABILIDAD.md</b> para el paso a paso de crear el proyecto y el script SQL necesario.
+      Vea <b>LEEME_ESTA_ENTREGA.md</b> para el paso a paso de crear el proyecto, el script SQL y la Edge Function necesarios.
     </div>
     <div class="card">
       <h2>Estado actual</h2>
@@ -2659,20 +2720,42 @@ function renderBaseDeDatos(root){
     if (!r.ok){
       if (!confirm('La prueba de conexión falló: ' + r.error + '\n\n¿Guardar de todas formas? (puede corregirlo después)')) return;
     }
+    const modoAnterior = STORAGE_MODE;
     const usuariosLocalesPrevios = DB.usuarios.slice();
+    const correoActual = SESSION.correo;
     await guardarConfigSupabase(url, key);
     await verificarAlmacenamiento();
-    await recargarDatosDeNegocio();
-    // Si es la primera vez que se conecta este proyecto (todavía no tiene usuarios),
-    // se lleva la(s) cuenta(s) local(es) — típicamente el Administrador que acaba de conectar —
-    // para que quede sembrada la base compartida y otros dispositivos puedan iniciar sesión.
-    let usuariosMigrados = 0;
-    if (DB.usuarios.length === 0 && usuariosLocalesPrevios.length > 0){
-      DB.usuarios = usuariosLocalesPrevios;
-      await saveUsuarios();
-      usuariosMigrados = usuariosLocalesPrevios.length;
+
+    if (STORAGE_MODE === 'supabase' && modoAnterior !== 'supabase'){
+      // Se conecta por primera vez desde un dispositivo que tenía cuentas locales: si el
+      // proyecto de Supabase está vacío, se siembra con esas cuentas (ya traen su hash real)
+      // y seguimos con sesión iniciada; si ya tiene cuentas, solo se recarga desde allá.
+      DB.usuarios = [];
+      const hayUsuarios = await kvConsultarEstadoUsuarios().catch(()=>true);
+      let usuariosMigrados = 0;
+      if (!hayUsuarios && usuariosLocalesPrevios.length > 0){
+        const mig = await kvMigrarUsuariosLocales(usuariosLocalesPrevios, correoActual);
+        SESSION_TOKEN = mig.token;
+        usuariosMigrados = usuariosLocalesPrevios.length;
+      } else {
+        alert('Este proyecto de Supabase ya tiene cuentas propias. Debe iniciar sesión con una de ellas — se cerrará esta sesión local.');
+        cerrarSesion('');
+        return;
+      }
+      await recargarDatosDeNegocio();
+      await sembrarDatosDeMuestraSiEsNecesario();
+      registrarAuditoria('Base de datos Supabase configurada', url + (usuariosMigrados ? ` · ${usuariosMigrados} cuenta(s) de usuario migradas` : ''));
+    } else if (STORAGE_MODE === 'supabase'){
+      // Ya se estaba usando Supabase y se cambió a OTRO proyecto distinto: el token de sesión
+      // actual no sirve ahí (es de otro proyecto), así que no hay forma de seguir autenticado
+      // sin la contraseña. Se cierra la sesión y se pide iniciar sesión de nuevo en el proyecto nuevo.
+      alert('Se conectó a un proyecto de Supabase distinto. Por seguridad debe iniciar sesión de nuevo allí (o crear el Administrador, si está vacío).');
+      cerrarSesion('');
+      return;
+    } else {
+      await recargarDatosDeNegocio();
+      registrarAuditoria('Base de datos Supabase configurada', url + ' (no se pudo confirmar conexión; revise la configuración)');
     }
-    registrarAuditoria('Base de datos Supabase configurada', url + (usuariosMigrados ? ` · ${usuariosMigrados} cuenta(s) de usuario migradas` : ''));
     renderAll();
   };
   const btnDesc = document.getElementById('sbDesconectar');
@@ -2680,6 +2763,7 @@ function renderBaseDeDatos(root){
     if (!confirm('¿Desconectar Supabase? La app volverá a usar Nube de Claude.ai / IndexedDB / localStorage — que puede tener datos distintos a los de Supabase. Sus datos en Supabase NO se borran, solo deja de usarlos esta app.')) return;
     await borrarConfigSupabase();
     await verificarAlmacenamiento();
+    SESSION_TOKEN = null;
     await recargarDatosDeNegocio();
     registrarAuditoria('Base de datos Supabase desconectada', '');
     renderAll();
@@ -2822,11 +2906,27 @@ function iniciarControlDeInactividad(){
   resetTimer();
 }
 
+// Decide si se debe mostrar "Configuración inicial" (crear el primer Administrador) o la
+// pantalla normal de acceso. En modo Supabase, DB.usuarios ya no se carga antes de iniciar
+// sesión (ver loadAll), así que esa decisión se basa en lo que respondió kv-proxy ("estado").
+function pasoInicialLogin(){
+  if (STORAGE_MODE === 'supabase') return (DB._hayUsuariosSupabase === false) ? 'setup-admin' : 'login';
+  return DB.usuarios.length===0 ? 'setup-admin' : 'login';
+}
 function cerrarSesion(mensaje){
   if (SESSION.authenticated) registrarAuditoria('Cierre de sesión', SESSION.correo||SESSION.usuario||'');
+  if (STORAGE_MODE === 'supabase'){
+    kvLogout();
+    SESSION_TOKEN = null;
+    // Sin sesión no hay token, y sin token kv-proxy no entrega nada — se limpia también la
+    // copia en memoria para que no queden datos de la familia/estudiantes/cuentas de la
+    // sesión anterior visibles en un dispositivo compartido.
+    DB.familias = []; DB.estudiantes = []; DB.actividades = []; DB.estudianteActividades = [];
+    DB.cuentas = []; DB.seguimientos = []; DB.abonos = []; DB.auditoria = []; DB.usuarios = [];
+  }
   SESSION = { usuario:null, rol:null, correo:null, authenticated:false };
   currentView = 'dashboard';
-  loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok: mensaje||'', pendingUser:null };
+  loginState = { step: pasoInicialLogin(), error:'', ok: mensaje||'', pendingUser:null };
   document.querySelector('.app').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   renderLogin();
@@ -2890,14 +2990,26 @@ function renderLogin(){
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)){ loginState.error='Ingrese un correo electrónico válido.'; renderLogin(); return; }
       if (pass.length < 6){ loginState.error='La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
       if (pass !== pass2){ loginState.error='Las contraseñas no coinciden.'; renderLogin(); return; }
-      const nuevoAdmin = {
-        nombre, correo, rol:'admin', passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
-        intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:new Date().toISOString(), creadoEl:new Date().toISOString()
-      };
-      DB.usuarios.push(nuevoAdmin);
-      await saveUsuarios();
-      registrarAuditoria('Configuración inicial', 'Cuenta de Administrador creada: ' + correo);
-      SESSION = { usuario:nuevoAdmin.nombre, rol:'admin', correo:nuevoAdmin.correo, authenticated:true };
+      const btnSu = document.getElementById('suSubmit'); btnSu.disabled = true; btnSu.textContent = 'Creando…';
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvSetupAdmin(nombre, correo, pass, pregunta, respuesta); }
+        catch(e){ loginState.error = e && e.message || 'No se pudo crear la cuenta.'; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        await sembrarDatosDeMuestraSiEsNecesario();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+      } else {
+        const nuevoAdmin = {
+          nombre, correo, rol:'admin', passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
+          intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:new Date().toISOString(), creadoEl:new Date().toISOString()
+        };
+        DB.usuarios.push(nuevoAdmin);
+        await saveUsuarios();
+        registrarAuditoria('Configuración inicial', 'Cuenta de Administrador creada: ' + correo);
+        SESSION = { usuario:nuevoAdmin.nombre, rol:'admin', correo:nuevoAdmin.correo, authenticated:true };
+      }
       loginState = { step:'login', error:'', ok:'', pendingUser:null };
       document.getElementById('loginScreen').style.display = 'none';
       document.querySelector('.app').style.display = 'grid';
@@ -2929,8 +3041,13 @@ function renderLogin(){
       if (!r.ok){ loginState.error = r.error; renderLogin(); return; }
       await guardarConfigSupabase(url, key);
       await verificarAlmacenamiento();
-      await recargarDatosDeNegocio();
-      loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'Conectado. Ahora puede iniciar sesión con las cuentas de su equipo.', pendingUser:null };
+      if (STORAGE_MODE === 'supabase'){
+        DB.usuarios = [];
+        try{ DB._hayUsuariosSupabase = await kvConsultarEstadoUsuarios(); }catch(e){ DB._hayUsuariosSupabase = null; }
+      } else {
+        await recargarDatosDeNegocio();
+      }
+      loginState = { step: pasoInicialLogin(), error:'', ok:'Conectado. Ahora puede iniciar sesión con las cuentas de su equipo.', pendingUser:null };
       renderLogin();
     };
     return;
@@ -2958,6 +3075,27 @@ function renderLogin(){
       const email = (document.getElementById('loEmail').value||'').trim().toLowerCase();
       const pass = document.getElementById('loPass').value||'';
       if (!email || !pass){ loginState.error = 'Ingrese correo y contraseña.'; loginState.ok=''; renderLogin(); return; }
+
+      if (STORAGE_MODE === 'supabase'){
+        // La verificación de la contraseña ahora corre en el servidor (kv-proxy): el navegador
+        // nunca recibe la lista de usuarios con sus contraseñas antes de iniciar sesión.
+        const btnLo = document.getElementById('loSubmit'); btnLo.disabled = true; btnLo.textContent = 'Ingresando…';
+        let r;
+        try{ r = await kvLogin(email, pass); }
+        catch(e){ loginState.error = (e && e.message) || 'No se pudo iniciar sesión.'; loginState.ok=''; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+        loginState = { step:'login', error:'', ok:'', pendingUser:null };
+        document.getElementById('loginScreen').style.display = 'none';
+        document.querySelector('.app').style.display = 'grid';
+        currentView = 'dashboard';
+        renderAll();
+        iniciarControlDeInactividad();
+        return;
+      }
+
       const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
       if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; loginState.ok=''; renderLogin(); return; }
 
@@ -3011,8 +3149,16 @@ function renderLogin(){
       <div class="login-actions"><button class="btn btn-primary" id="frSubmit">Continuar</button></div>
     `);
     document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
-    document.getElementById('frSubmit').onclick = ()=>{
+    document.getElementById('frSubmit').onclick = async ()=>{
       const email = (document.getElementById('frEmail').value||'').trim().toLowerCase();
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvRecuperarPregunta(email); }
+        catch(e){ loginState.error = (e && e.message) || 'No existe una cuenta con ese correo.'; renderLogin(); return; }
+        loginState = { step:'forgot-question', error:'', ok:'', pendingUser:{ correo: email, pregunta: r.pregunta } };
+        renderLogin();
+        return;
+      }
       const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
       if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; renderLogin(); return; }
       loginState = { step:'forgot-question', error:'', ok:'', pendingUser:user };
@@ -3033,6 +3179,14 @@ function renderLogin(){
     document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
     document.getElementById('frCheck').onclick = async ()=>{
       const resp = document.getElementById('frResp').value||'';
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvVerificarRespuesta(user.correo, resp); }
+        catch(e){ loginState.error = (e && e.message) || 'La respuesta no coincide.'; renderLogin(); return; }
+        loginState = { step:'forgot-reset', error:'', ok:'', pendingUser:{ correo:user.correo, resetToken:r.resetToken } };
+        renderLogin();
+        return;
+      }
       const hash = await hashText(resp);
       if (hash !== user.respuestaHash){ loginState.error = 'La respuesta no coincide. Intente de nuevo o pida a un Administrador que restablezca su clave.'; renderLogin(); return; }
       loginState = { step:'forgot-reset', error:'', ok:'', pendingUser:user };
@@ -3055,6 +3209,24 @@ function renderLogin(){
       const p2 = document.getElementById('frNewPass2').value||'';
       if (p1.length < 6){ loginState.error = 'La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
       if (p1 !== p2){ loginState.error = 'Las contraseñas no coinciden.'; renderLogin(); return; }
+
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvResetearPassword(user.correo, user.resetToken, p1); }
+        catch(e){ loginState.error = (e && e.message) || 'No se pudo restablecer la contraseña.'; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+        loginState = { step:'login', error:'', ok:'', pendingUser:null };
+        document.getElementById('loginScreen').style.display = 'none';
+        document.querySelector('.app').style.display = 'grid';
+        currentView = 'dashboard';
+        renderAll();
+        iniciarControlDeInactividad();
+        return;
+      }
+
       user.passwordHash = await hashText(p1);
       user.intentosFallidos = 0; user.bloqueadoHasta = null; user.ultimoAcceso = new Date().toISOString();
       await saveUsuarios();
@@ -3078,7 +3250,7 @@ function renderLogin(){
     await loadAll();
     document.querySelector('.app').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
-    loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'', pendingUser:null };
+    loginState = { step: pasoInicialLogin(), error:'', ok:'', pendingUser:null };
     renderLogin();
   }catch(err){
     document.getElementById('loginScreen').style.display = 'flex';

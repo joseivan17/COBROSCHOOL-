@@ -175,6 +175,45 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:18px 0;}
 .login-link{text-align:center;font-size:12.3px;color:var(--accent-dark);cursor:pointer;font-weight:600;margin-top:6px;}
 .login-back{font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:14px;display:inline-block;}
 .login-note{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:11.5px;color:var(--muted);margin-top:16px;}
+
+/* ---------- Animaciones básicas ---------- */
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes modalPop{from{opacity:0;transform:scale(.95) translateY(4px);}to{opacity:1;transform:scale(1) translateY(0);}}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;}
+}
+
+.view-anim{animation:fadeSlideIn .25s ease both;}
+.card{animation:fadeSlideIn .25s ease both;}
+.modal-bg{animation:fadeIn .15s ease both;}
+.modal{animation:modalPop .2s cubic-bezier(.22,.9,.32,1.1) both;}
+
+.btn{transition:background-color .15s ease, border-color .15s ease, color .15s ease, transform .08s ease, box-shadow .15s ease;}
+.btn:hover{box-shadow:0 1px 4px rgba(15,33,56,.08);}
+.btn:active{transform:scale(.95);}
+.btn-primary:hover{box-shadow:0 2px 8px rgba(43,110,201,.25);}
+
+.navlink{transition:background-color .15s ease, color .15s ease, padding-left .15s ease;}
+.navlink:hover:not(.active){background:rgba(255,255,255,.06);color:#fff;padding-left:15px;}
+.navlink.active{transition:background-color .2s ease;}
+
+tr{transition:background-color .12s ease;}
+.linklike-row:hover td{background:var(--accent-light) !important;}
+
+.stat{transition:transform .18s ease, box-shadow .18s ease;}
+.stat:hover{transform:translateY(-3px);box-shadow:0 6px 16px rgba(15,33,56,.09);}
+
+.badge, .storage-badge, .pill-warn, .pill-error, .pill-ok{transition:background-color .15s ease, transform .15s ease;}
+
+.tab{transition:color .15s ease, border-color .15s ease;}
+
+input, select, textarea{transition:border-color .15s ease, box-shadow .15s ease;}
+input:focus, select:focus, textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+
+.dropzone{transition:border-color .15s ease, color .15s ease, background-color .15s ease;}
+
+.timeline .tl-item{animation:fadeSlideIn .2s ease both;}
 </style>
 </head>
 <body>
@@ -198,6 +237,7 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <p id="pageSub">Panel general de cuentas críticas</p>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span class="small mono" style="color:var(--muted);" title="Versión de esta copia de la app — si acabas de subir un archivo nuevo y sigues viendo la versión vieja aquí, tu navegador o GitHub Pages todavía tienen la anterior en caché.">v${APP_VERSION}</span>
         <span id="storageBadge" class="storage-badge" title="Dónde se están guardando tus datos"></span>
         <div class="session-box">
           <span class="small">Sesión:</span>
@@ -243,6 +283,9 @@ const SUPABASE_DEFAULT_URL = 'https://mtbpwxspnpdeaumtclqw.supabase.co';
 const SUPABASE_DEFAULT_KEY = 'sb_publishable_Q4KMY5cQtrBSiqte_pGo7g_FJgPLGbz';
 let SUPABASE_URL = null;
 let SUPABASE_ANON_KEY = null;
+// Token de sesión emitido por la Edge Function kv-proxy al iniciar sesión. Mientras no exista,
+// la Edge Function rechaza cualquier lectura/escritura de datos de negocio (ver kv-proxy/index.ts).
+let SESSION_TOKEN = null;
 
 async function cargarConfigSupabase(){
   let cfg = null;
@@ -277,8 +320,10 @@ async function borrarConfigSupabase(){
   try{ localStorage.setItem('ccc_local:ccc:supabase_config', JSON.stringify(marcador)); }catch(e){}
 }
 
-/* ---------- Supabase: se habla por REST puro (fetch), sin librería externa,
-   para no depender de un CDN fuera de lo permitido en este entorno. ---------- */
+/* ---------- Supabase: ya NO se habla directo con /rest/v1/kv_store (eso es lo
+   que dejaba todos los datos abiertos a cualquiera con la anon key). Todo pasa
+   ahora por la Edge Function kv-proxy, que corre con la service_role key en el
+   servidor y exige una sesión válida antes de entregar o aceptar datos. ---------- */
 // Tiempo máximo de espera para cualquier llamada a Supabase. Sin esto, una red lenta o que
 // bloquee la conexión en silencio podía dejar el arranque de la app esperando indefinidamente.
 const SUPABASE_TIMEOUT_MS = 7000;
@@ -287,25 +332,39 @@ function fetchConTimeout(url, options){
   const timer = setTimeout(()=> controller.abort(), SUPABASE_TIMEOUT_MS);
   return fetch(url, { ...(options||{}), signal: controller.signal }).finally(()=> clearTimeout(timer));
 }
-async function supabaseFetch(path, options){
-  options = options || {};
-  return fetchConTimeout(SUPABASE_URL + path, {
-    ...options,
+async function kvProxyLlamar(body, { base, key } = {}){
+  const url = (base || SUPABASE_URL) + '/functions/v1/kv-proxy';
+  const apiKey = key || SUPABASE_ANON_KEY;
+  const res = await fetchConTimeout(url, {
+    method: 'POST',
     headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: 'Bearer ' + SUPABASE_ANON_KEY,
+      apikey: apiKey,
+      Authorization: 'Bearer ' + apiKey,
       'Content-Type': 'application/json',
-      ...(options.headers||{})
-    }
+      ...(SESSION_TOKEN ? { 'x-session-token': SESSION_TOKEN } : {})
+    },
+    body: JSON.stringify(body)
   });
+  let data = null;
+  try{ data = await res.json(); }catch(e){ /* respuesta no era JSON */ }
+  if (!res.ok){
+    const err = new Error((data && data.error) ? data.error : ('kv-proxy falló (código ' + res.status + ')'));
+    err.status = res.status;
+    throw err;
+  }
+  return data || {};
 }
 async function supabaseProbar(url, key){
   const base = normalizarSupabaseUrl(url);
   if (!base || !key) return { ok:false, error:'Complete el Project URL y la anon key.' };
   try{
-    const res = await fetchConTimeout(base + '/rest/v1/kv_store?limit=1', { headers: { apikey:key, Authorization:'Bearer '+key } });
+    const res = await fetchConTimeout(base + '/functions/v1/kv-proxy', {
+      method: 'POST',
+      headers: { apikey:key, Authorization:'Bearer '+key, 'Content-Type':'application/json' },
+      body: JSON.stringify({ action:'ping' })
+    });
     if (res.status === 200) return { ok:true };
-    if (res.status === 404 || res.status === 400) return { ok:false, error:'No se encontró la tabla "kv_store". Verifique que ejecutó el script SQL en su proyecto de Supabase (ver ARQUITECTURA_Y_ESCALABILIDAD.md).' };
+    if (res.status === 404) return { ok:false, error:'No se encontró la función "kv-proxy". Verifique que la desplegó en su proyecto de Supabase (ver LEEME_ESTA_ENTREGA.md).' };
     if (res.status === 401 || res.status === 403) return { ok:false, error:'Credenciales rechazadas (código '+res.status+'). Verifique el Project URL y la anon key.' };
     return { ok:false, error:'Respuesta inesperada del servidor (código ' + res.status + ').' };
   }catch(e){
@@ -314,18 +373,37 @@ async function supabaseProbar(url, key){
   }
 }
 async function supabaseGet(key){
-  const res = await supabaseFetch('/rest/v1/kv_store?key=eq.' + encodeURIComponent(key) + '&select=value', { method:'GET' });
-  if (!res.ok) throw new Error('Supabase GET falló (código ' + res.status + ')');
-  const rows = await res.json();
-  return (rows && rows[0] && rows[0].value !== undefined) ? rows[0].value : null;
+  const data = await kvProxyLlamar({ action:'get', key });
+  return (data.value !== undefined) ? data.value : null;
 }
 async function supabaseSet(key, value){
-  const res = await supabaseFetch('/rest/v1/kv_store', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ key, value, updated_at: new Date().toISOString() })
-  });
-  if (!res.ok) throw new Error('Supabase SET falló (código ' + res.status + ')');
+  await kvProxyLlamar({ action:'set', key, value });
+}
+// --- Acciones de autenticación: ahora corren en el servidor (kv-proxy), no en el navegador. ---
+async function kvConsultarEstadoUsuarios(){
+  const data = await kvProxyLlamar({ action:'estado' });
+  return !!data.hayUsuarios;
+}
+async function kvSetupAdmin(nombre, correo, pass, pregunta, respuesta){
+  return await kvProxyLlamar({ action:'setup-admin', nombre, correo, pass, pregunta, respuesta });
+}
+async function kvLogin(correo, password){
+  return await kvProxyLlamar({ action:'login', correo, password });
+}
+async function kvRecuperarPregunta(correo){
+  return await kvProxyLlamar({ action:'recuperar-pregunta', correo });
+}
+async function kvVerificarRespuesta(correo, respuesta){
+  return await kvProxyLlamar({ action:'verificar-respuesta', correo, respuesta });
+}
+async function kvResetearPassword(correo, resetToken, nuevaPassword){
+  return await kvProxyLlamar({ action:'resetear-password', correo, resetToken, nuevaPassword });
+}
+async function kvLogout(){
+  try{ await kvProxyLlamar({ action:'logout' }); }catch(e){ /* no crítico */ }
+}
+async function kvMigrarUsuariosLocales(usuarios, comoCorreo){
+  return await kvProxyLlamar({ action:'migrar-usuarios', usuarios, comoCorreo });
 }
 
 // Hash simple en JS puro (sin depender de crypto.subtle, que no siempre está
@@ -422,11 +500,12 @@ async function verificarAlmacenamiento(){
   if (SUPABASE_URL && SUPABASE_ANON_KEY){
     STORAGE_DIAG.supabaseIntentado = true;
     try{
-      await supabaseSet(testKey, testVal);
-      const back = await supabaseGet(testKey);
-      const ok = !!(back && back.r === testVal.r);
-      STORAGE_DIAG.supabaseFunciona = ok;
-      if (ok){ STORAGE_MODE = 'supabase'; return; }
+      // Antes de iniciar sesión no hay token todavía, así que la prueba de conectividad
+      // usa la acción "ping" (no toca datos de negocio) en vez de leer/escribir una llave real.
+      await kvProxyLlamar({ action:'ping' });
+      STORAGE_DIAG.supabaseFunciona = true;
+      STORAGE_MODE = 'supabase';
+      return;
     }catch(e){ STORAGE_DIAG.detalle = 'Supabase: ' + (e && e.message || e); }
   }
 
@@ -525,12 +604,27 @@ async function dbSet(key, value){
 async function loadAll(){
   await cargarConfigSupabase();
   await verificarAlmacenamiento();
+  if (STORAGE_MODE === 'supabase'){
+    // En modo Supabase, kv-proxy ya no entrega NINGÚN dato de negocio (ni siquiera la lista de
+    // usuarios) sin un token de sesión válido — y ese token no existe todavía antes de iniciar
+    // sesión. Antes solo necesitamos saber si ya existe alguna cuenta, para decidir si se muestra
+    // "Configuración inicial" o la pantalla de acceso; el resto se carga recién tras el login
+    // (ver los puntos donde se llama a recargarDatosDeNegocio() en la autenticación, más abajo).
+    DB.usuarios = [];
+    try{ DB._hayUsuariosSupabase = await kvConsultarEstadoUsuarios(); }
+    catch(e){ DB._hayUsuariosSupabase = null; /* no se pudo determinar; se trata como "sí hay" para no reofrecer crear un admin por error */ }
+    return;
+  }
   await recargarDatosDeNegocio();
+  await sembrarDatosDeMuestraSiEsNecesario();
+}
+async function sembrarDatosDeMuestraSiEsNecesario(){
   const yaSeSembro = await dbGet('ccc:seeded', false);
   if (!yaSeSembro && DB.familias.length === 0 && DB.estudiantes.length === 0){
     seedSampleData();
-    // Se usa dbSet directo (no save*) porque esta siembra ocurre antes de cualquier inicio de sesión;
-    // el guardia de autenticación bloquearía estos guardados si pasaran por saveFamilias/saveEstudiantes/etc.
+    // Se usa dbSet directo (no save*) porque esta siembra puede ocurrir antes de cualquier guardia
+    // de sesión adicional de la pantalla actual; el guardia de autenticación (requireAuth) bloquearía
+    // estos guardados si pasaran por saveFamilias/saveEstudiantes/etc.
     await dbSet('ccc:familias', DB.familias);
     await dbSet('ccc:estudiantes', DB.estudiantes);
     await dbSet('ccc:cuentas', DB.cuentas);
@@ -557,8 +651,15 @@ async function recargarDatosDeNegocio(){
   let migrated = false;
   for (const u of DB.usuarios){
     if (!u.correo){ u.correo = (u.nombre||'usuario').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'') + '@sunegocio.com'; migrated = true; }
-    if (!u.passwordHash){ u.passwordHash = await hashText('cambiar123'); migrated = true; }
-    if (!u.pregunta){ u.pregunta = '¿Cuál es su color favorito?'; u.respuestaHash = await hashText('azul'); migrated = true; }
+    if (STORAGE_MODE !== 'supabase'){
+      if (!u.passwordHash){ u.passwordHash = await hashText('cambiar123'); migrated = true; }
+      if (!u.pregunta){ u.pregunta = '¿Cuál es su color favorito?'; u.respuestaHash = await hashText('azul'); migrated = true; }
+    } else if (!u.pregunta){
+      // En modo Supabase, kv-proxy ya no envía passwordHash/respuestaHash al navegador a propósito
+      // (ver kv-proxy/index.ts); completarlos aquí con valores inventados borraría las contraseñas
+      // reales de todo el mundo en el próximo guardado. Solo se completa la pregunta visible.
+      u.pregunta = '¿Cuál es su color favorito?'; migrated = true;
+    }
     if (u.intentosFallidos === undefined){ u.intentosFallidos = 0; migrated = true; }
     if (u.bloqueadoHasta === undefined){ u.bloqueadoHasta = null; migrated = true; }
     if (!u.ultimoAcceso){ u.ultimoAcceso = null; migrated = true; }
@@ -668,10 +769,15 @@ function cuid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.no
    ========================================================================= */
 const ROLE_LABEL = {admin:"Administrador", contable:"Contable", auxiliar:"Auxiliar"};
 const PERMS = {
-  admin:    { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:true, gestionarUsuarios:true, editarFicha:true, editarSoloPropio:false },
-  contable: { verDashboard:true, editarCuenta:true, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
-  auxiliar: { verDashboard:true, editarCuenta:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
+  admin:    { verDashboard:true, editarCuenta:true, eliminarRegistros:true,  registrarGestion:true, importar:true, editarCatalogos:true, gestionarUsuarios:true, editarFicha:true, editarSoloPropio:false },
+  contable: { verDashboard:true, editarCuenta:true, eliminarRegistros:false, registrarGestion:true, importar:true, editarCatalogos:false, gestionarUsuarios:false, editarFicha:true, editarSoloPropio:false },
+  auxiliar: { verDashboard:true, editarCuenta:false, eliminarRegistros:false, registrarGestion:true, importar:false, editarCatalogos:false, gestionarUsuarios:false, editarFicha:false, editarSoloPropio:true }
 };
+// Se actualiza cada vez que se entrega una nueva versión de este archivo. Si acabas de subir
+// un cambio y no ves esta fecha reflejada en la app (arriba a la derecha, o en la pantalla de
+// inicio de sesión), significa que tu navegador o GitHub Pages todavía están sirviendo la
+// versión anterior en caché — no que el cambio no se haya guardado.
+const APP_VERSION = '2026-10-22.6-fix-seguridad';
 let SESSION = { usuario: null, rol: null, correo: null, authenticated: false };
 function perm(key){ return (SESSION.authenticated && SESSION.rol) ? PERMS[SESSION.rol][key] : false; }
 
@@ -770,6 +876,12 @@ function renderAll(){
     fichas: renderFichas, historial: renderHistorial, catalogos: renderCatalogos, usuarios: renderUsuarios,
     respaldo: renderRespaldo, auditoria: renderAuditoria, basededatos: renderBaseDeDatos
   })[currentView](view);
+  // Reinicia la animación de aparición en cada cambio de módulo: como #view no se recrea
+  // (solo se reemplaza su contenido), hay que quitar y volver a poner la clase, forzando
+  // un reflow en medio, para que la animación se repita en vez de jugarse una sola vez.
+  view.classList.remove('view-anim');
+  void view.offsetWidth;
+  view.classList.add('view-anim');
 }
 
 /* =========================================================================
@@ -808,7 +920,11 @@ function periodosDisponibles(){
 function ultimoPeriodo(){ const p = periodosDisponibles(); return p[0] || null; }
 function diasDesde(fechaStr){
   if(!fechaStr) return Infinity;
-  const d = new Date(fechaStr); const now = new Date();
+  // "2026-11-08" sin hora se interpreta como medianoche UTC por defecto en JS — se fuerza a
+  // medianoche LOCAL para que el conteo de días no se desfase según la zona horaria del usuario.
+  const partes = String(fechaStr).split('-').map(Number);
+  const d = (partes.length===3) ? new Date(partes[0], partes[1]-1, partes[2]) : new Date(fechaStr);
+  const now = new Date();
   return Math.floor((now-d)/(1000*60*60*24));
 }
 
@@ -823,6 +939,50 @@ function esMesFueraDeCiclo(periodo){
   if (!periodo || !/^\d{4}-\d{2}$/.test(periodo)) return false;
   const mes = periodo.split('-')[1];
   return !MESES_CICLO_ESCOLAR.includes(mes);
+}
+// Calcula el periodo (AAAA-MM) que sigue a otro, saltando agosto (fuera del ciclo escolar).
+function siguientePeriodo(periodo){
+  const [y, m] = periodo.split('-').map(Number);
+  let nuevoAnio = y, nuevoMes = m + 1;
+  if (nuevoMes === 8) nuevoMes = 9; // saltar agosto
+  if (nuevoMes > 12){ nuevoMes = 1; nuevoAnio++; }
+  return `${nuevoAnio}-${String(nuevoMes).padStart(2,'0')}`;
+}
+// Genera automáticamente el periodo siguiente a partir de las cuentas TODAVÍA activas
+// (no regularizadas) de un periodo — les suma un mes de mora, traslada el balance pendiente
+// como nuevo balance del mes, y conserva el responsable asignado. No duplica: si un estudiante
+// ya tiene un registro en el periodo destino, se omite (para poder correrlo más de una vez sin miedo).
+async function generarPeriodoSiguiente(periodoOrigen){
+  if (!perm('editarCuenta')){ alert('Su rol no tiene permiso para generar un nuevo periodo.'); return null; }
+  const origen = DB.cuentas.filter(c=>c.periodo===periodoOrigen && c.estado!=='Regularizado');
+  if (!origen.length){ alert('No hay cuentas activas (sin regularizar) en este periodo para trasladar al mes siguiente.'); return null; }
+  const nuevoPeriodo = siguientePeriodo(periodoOrigen);
+  const existentes = new Set(DB.cuentas.filter(c=>c.periodo===nuevoPeriodo).map(c=>normCode(c.codigoEstudiante)));
+  const resumen = `Esto creará el periodo ${nuevoPeriodo} a partir de las ${origen.length} cuenta(s) activa(s) de ${periodoOrigen}:\n` +
+    `• Meses adeudados: +1 respecto al mes actual\n• Balance: se traslada el balance pendiente (ya descontando abonos)\n` +
+    `• Estado: vuelve a "Pendiente", responsable y observaciones se conservan\n\n` +
+    `Los estudiantes que ya tengan un registro en ${nuevoPeriodo} se omiten (no se duplican).\n\n¿Continuar?`;
+  if (!confirm(resumen)) return null;
+  let creadas = 0, omitidas = 0;
+  origen.forEach(c=>{
+    if (existentes.has(normCode(c.codigoEstudiante))){ omitidas++; return; }
+    const pendiente = balancePendiente(c);
+    DB.cuentas.push({
+      id: cuid(), codigoEstudiante: c.codigoEstudiante, periodo: nuevoPeriodo,
+      mesesAdeudados: Number(c.mesesAdeudados||0) + 1,
+      balanceAnioAnterior: 0, balance: pendiente,
+      fechaUltimoPago: c.fechaUltimoPago||'', montoUltimoPago: '',
+      estado: 'Pendiente', responsable: c.responsable||'',
+      fechaUltimaGestion: c.fechaUltimaGestion||'', proximoSeguimiento: c.proximoSeguimiento||'',
+      observaciones: c.observaciones||'',
+      nombreEstudianteImportado: c.nombreEstudianteImportado||'', nombreFamiliaImportado: c.nombreFamiliaImportado||'', codigoFamiliaImportado: c.codigoFamiliaImportado||''
+    });
+    creadas++;
+  });
+  await saveCuentas();
+  registrarAuditoria('Periodo generado automáticamente', `${periodoOrigen} → ${nuevoPeriodo}: ${creadas} creada(s), ${omitidas} omitida(s) (ya existían)`);
+  alert(`Periodo ${nuevoPeriodo} generado: ${creadas} cuenta(s) nueva(s)${omitidas?`, ${omitidas} omitida(s) porque ya existían`:''}.`);
+  return { nuevoPeriodo, creadas, omitidas };
 }
 function abonosDeCuenta(cuentaId){
   return DB.abonos.filter(a=>a.cuentaId===cuentaId).sort((a,b)=>a.fecha.localeCompare(b.fecha));
@@ -845,6 +1005,27 @@ function actividadesPendientesDeEstudiante(codigoEstudiante){
 }
 // Todos los estudiantes que pertenecen a una misma familia (por Codigo_Familia) — para cuando
 // una familia tiene más de un hijo y se necesita ver la deuda de todos juntos, no uno a la vez.
+// Cada cuenta crítica (una por periodo) guarda un resumen (fechaUltimaGestion, proximoSeguimiento)
+// para que el Dashboard no tenga que recorrer todos los seguimientos cada vez. Una gestión no
+// pertenece a un periodo en particular — es sobre la familia/estudiante en general — así que este
+// resumen se aplica a TODOS los periodos de ese estudiante, no solo al más reciente. Si solo se
+// actualizara el periodo más reciente, un estudiante con deuda de varios meses seguiría apareciendo
+// "sin seguimiento" en los periodos anteriores aunque acabaras de darle seguimiento hoy.
+function sincronizarResumenGestionEstudiante(codigoEstudiante){
+  const cuentasEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante);
+  if (!cuentasEst.length) return [];
+  // Se ordena primero por fecha (lo que la persona escribió) y, si varias gestiones comparten
+  // el mismo día, se desempata por la marca de tiempo real de creación — así la que de verdad
+  // se registró más reciente es la que manda, no una anterior del mismo día por casualidad de orden.
+  const segsEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante)
+    .sort((a,b)=> b.fecha.localeCompare(a.fecha) || (b.creadoEn||'').localeCompare(a.creadoEn||''));
+  const ultimoSeg = segsEst[0];
+  cuentasEst.forEach(c=>{
+    c.fechaUltimaGestion = ultimoSeg ? ultimoSeg.fecha : '';
+    c.proximoSeguimiento = ultimoSeg ? (ultimoSeg.proximaGestion || '') : '';
+  });
+  return cuentasEst;
+}
 function estudiantesDeFamilia(codigoFamilia){
   const c = normCode(codigoFamilia);
   return DB.estudiantes.filter(e=>normCode(e.codigoFamilia)===c);
@@ -1009,15 +1190,22 @@ function drawDashboardBody(periodo, nivelFiltro, actividadFiltro){
     const codsConActividad = new Set(DB.estudianteActividades.filter(ea=>ea.actividad===actividadFiltro && ea.estado==='Activa').map(ea=>ea.codigoEstudiante));
     rows = rows.filter(r=>codsConActividad.has(r.codigoEstudiante));
   }
-  const familiasSet = new Set(rows.map(r=> r._est ? r._est.codigoFamilia : null).filter(Boolean));
-  const balanceTotal = rows.filter(r=>r.estado!=='Regularizado').reduce((s,r)=>s+balancePendiente(r),0);
+  // A partir de aquí, todas las métricas de "cuentas críticas" (familias, balance, distribución
+  // de mora, sin seguimiento, top 10) usan solo las cuentas TODAVÍA activas — una vez regularizada,
+  // ya no debe seguir sumando en ninguna de estas tarjetas, aunque el registro histórico persista.
+  const rowsActivas = rows.filter(r=>r.estado!=='Regularizado');
+  // Solo cuentan las familias que TODAVÍA tienen una cuenta crítica activa — una vez que se
+  // regulariza (balance en $0, o marcada a mano), ya no es una "cuenta crítica" pendiente,
+  // así que no debe seguir sumando aquí aunque el registro histórico del periodo siga existiendo.
+  const familiasSet = new Set(rowsActivas.map(r=> r._est ? r._est.codigoFamilia : null).filter(Boolean));
+  const balanceTotal = rowsActivas.reduce((s,r)=>s+balancePendiente(r),0);
   const rangos = {r3:0,r4_5:0,r6:0};
-  rows.forEach(r=>{
+  rowsActivas.forEach(r=>{
     const m = Number(r.mesesAdeudados||0);
     if (m===3) rangos.r3++; else if (m>=4&&m<=5) rangos.r4_5++; else if (m>=6) rangos.r6++;
   });
-  const sinSeguimiento = rows.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && new Date(r.proximoSeguimiento) < new Date()));
-  const top10 = [...rows].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
+  const sinSeguimiento = rowsActivas.filter(r=> diasDesde(r.fechaUltimaGestion) > 15 || (r.proximoSeguimiento && diasDesde(r.proximoSeguimiento) >= 0));
+  const top10 = [...rowsActivas].sort((a,b)=>balancePendiente(b)-balancePendiente(a)).slice(0,10);
   const actividadesPendientes = DB.estudianteActividades.filter(ea=>!ea.pagado).map(ea=>({...ea, _est: estudianteByCodigo(ea.codigoEstudiante)}));
   const montoActividadesPendientes = actividadesPendientes.reduce((s,a)=>s+Number(a.costo||0),0);
 
@@ -1103,6 +1291,7 @@ function renderReporte(root){
       <div class="field"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.8px;font-weight:normal;padding:7px 0;"><input type="checkbox" id="rMostrarPagadas"> Mostrar cuentas ya saldadas/regularizadas</label></div>
       <div class="field"><label>&nbsp;</label><button class="btn" id="rExport" title="Genera un Excel con el mismo formato que la plantilla de importación, listo para editar y volver a subir">⭳ Exportar (reimportable)</button></div>
       ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="rNuevaCuenta">+ Agregar registro manual</button></div>`:''}
+      ${perm('editarCuenta')?`<div class="field"><label>&nbsp;</label><button class="btn" id="rGenerarSiguiente" title="Crea el periodo del mes siguiente a partir de las cuentas todavía activas de este periodo">→ Generar periodo siguiente</button></div>`:''}
     </div>
     <div class="tablewrap">
       <table>
@@ -1171,7 +1360,7 @@ function renderReporte(root){
           ${canEditEstado?`<button class="btn btn-sm" data-editar="${r.id}">✏ Editar</button>`:''}
           ${canEditEstado?`<button class="btn btn-sm btn-primary" data-abono="${r.id}">+ Abono</button>`:''}
           <button class="btn btn-sm" data-gest="${r.id}">+ Gestión</button>
-          ${canEditEstado?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delcuenta="${r.id}" title="Eliminar este registro">✕</button>`:''}
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="20" class="empty">${mostrarPagadas?'No hay registros con estos filtros.':'No hay cuentas con saldo pendiente en este periodo. Active "Mostrar cuentas ya saldadas/regularizadas" para ver el historial completo.'}</td></tr>`;
@@ -1194,6 +1383,7 @@ function renderReporte(root){
     });
     tbody.querySelectorAll('[data-delcuenta]').forEach(btn=>{
       btn.onclick = async ()=>{
+        if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
         if (!confirm('¿Eliminar este registro de cuenta crítica del periodo? Esta acción no se puede deshacer. Los abonos asociados también se eliminarán.')) return;
         const cuentaId = btn.dataset.delcuenta;
         const cuentaBorrada = DB.cuentas.find(c=>c.id===cuentaId);
@@ -1219,6 +1409,15 @@ function renderReporte(root){
   ['rPeriodo','rNivel','rGrado','rEstado','rResp','rRango','rMostrarPagadas'].forEach(id=> document.getElementById(id).onchange = draw);
   const nuevaCuentaBtn = document.getElementById('rNuevaCuenta');
   if (nuevaCuentaBtn) nuevaCuentaBtn.onclick = ()=> openCuentaModal(null, document.getElementById('rPeriodo').value, ()=>{ renderReporte(root); });
+  const generarSiguienteBtn = document.getElementById('rGenerarSiguiente');
+  if (generarSiguienteBtn) generarSiguienteBtn.onclick = async ()=>{
+    const resultado = await generarPeriodoSiguiente(document.getElementById('rPeriodo').value);
+    if (resultado){
+      renderReporte(root);
+      // Selecciona automáticamente el periodo recién creado para que se vea de inmediato
+      setTimeout(()=>{ const sel = document.getElementById('rPeriodo'); if (sel){ sel.value = resultado.nuevoPeriodo; sel.dispatchEvent(new Event('change')); } }, 0);
+    }
+  };
   if (periodos.length) draw(); else document.getElementById('rBody').innerHTML = `<tr><td colspan="20" class="empty">Aún no hay datos importados.</td></tr>`;
 }
 
@@ -1322,15 +1521,16 @@ function openCuentaModal(cuentaId, periodoSugerido, onDone){
   };
 }
 
-function openGestionModal(cuentaId, onDone){
-  const c = DB.cuentas.find(c=>c.id===cuentaId);
-  const est = estudianteByCodigo(c.codigoEstudiante);
+function openGestionModal(cuentaId, onDone, codigoEstudianteFallback){
+  const c = cuentaId ? DB.cuentas.find(c=>c.id===cuentaId) : null;
+  const codigoEstudiante = c ? c.codigoEstudiante : codigoEstudianteFallback;
+  const est = estudianteByCodigo(codigoEstudiante);
   const root = document.getElementById('modalRoot');
   root.innerHTML = `
   <div class="modal-bg" id="mbg">
     <div class="modal">
       <h3>Registrar gestión</h3>
-      <p class="small">${est?est.nombre:c.codigoEstudiante} · ${c.codigoEstudiante}</p>
+      <p class="small">${est?est.nombre:codigoEstudiante} · ${codigoEstudiante}</p>
       <div class="formgrid">
         <div><label>Fecha</label><input type="date" id="gFecha" value="${new Date().toISOString().slice(0,10)}"></div>
         <div><label>Responsable</label><select id="gResp">${DB.catalogos.responsables.map(r=>`<option ${r===SESSION.usuario?'selected':''}>${r}</option>`).join('')}</select></div>
@@ -1349,20 +1549,109 @@ function openGestionModal(cuentaId, onDone){
   document.getElementById('gCancel').onclick = closeModal;
   document.getElementById('gGuardar').onclick = async ()=>{
     const seg = {
-      id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: c.codigoEstudiante,
+      id: cuid(), fecha: document.getElementById('gFecha').value, codigoEstudiante: codigoEstudiante,
       responsable: document.getElementById('gResp').value, medio: document.getElementById('gMedio').value,
       resultado: document.getElementById('gResultado').value, proximaGestion: document.getElementById('gProxima').value,
-      observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario
+      observaciones: document.getElementById('gObs').value, creadoPor: SESSION.usuario,
+      // Marca de tiempo real (con hora), aparte del campo "fecha" que la persona escribe manualmente
+      // (solo día, sin hora). Se usa para saber cuál gestión fue realmente la más reciente cuando
+      // varias se registran el mismo día — el campo "fecha" solo no alcanza para desempatar bien.
+      creadoEn: new Date().toISOString()
     };
     DB.seguimientos.push(seg);
-    c.fechaUltimaGestion = seg.fecha;
-    if (seg.proximaGestion) c.proximoSeguimiento = seg.proximaGestion;
+    sincronizarResumenGestionEstudiante(codigoEstudiante);
     await saveSeguimientos(); await saveCuentas();
-    registrarAuditoria('Gestión registrada', `${c.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
+    registrarAuditoria('Gestión registrada', `${codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
     closeModal(); if (onDone) onDone();
   };
 }
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+// Editar una gestión ya registrada. Disponible para Administrador y Contable (mismo permiso
+// que editar fichas); eliminar queda reservado a Administrador — se revisa en cada punto de uso.
+function openEditarGestionModal(seguimientoId, onDone){
+  const seg = DB.seguimientos.find(s=>s.id===seguimientoId);
+  if (!seg) return;
+  const est = estudianteByCodigo(seg.codigoEstudiante);
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+  <div class="modal-bg" id="mbg">
+    <div class="modal">
+      <h3>Editar gestión</h3>
+      <p class="small">${est?est.nombre:seg.codigoEstudiante} · ${seg.codigoEstudiante}</p>
+      <div class="formgrid">
+        <div><label>Fecha</label><input type="date" id="gFecha" value="${seg.fecha}"></div>
+        <div><label>Responsable</label><select id="gResp">${DB.catalogos.responsables.map(r=>`<option ${r===seg.responsable?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Medio de contacto</label><select id="gMedio">${DB.catalogos.mediosContacto.map(m=>`<option ${m===seg.medio?'selected':''}>${m}</option>`).join('')}</select></div>
+        <div><label>Resultado</label><select id="gResultado">${DB.catalogos.resultadosGestion.map(r=>`<option ${r===seg.resultado?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div><label>Próxima gestión</label><input type="date" id="gProxima" value="${seg.proximaGestion||''}"></div>
+        <div class="full"><label>Observaciones</label><textarea id="gObs">${seg.observaciones||''}</textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="gCancel">Cancelar</button>
+        <button class="btn btn-primary" id="gGuardar">Guardar cambios</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('mbg').onclick = (e)=>{ if(e.target.id==='mbg') closeModal(); };
+  document.getElementById('gCancel').onclick = closeModal;
+  document.getElementById('gGuardar').onclick = async ()=>{
+    seg.fecha = document.getElementById('gFecha').value;
+    seg.responsable = document.getElementById('gResp').value;
+    seg.medio = document.getElementById('gMedio').value;
+    seg.resultado = document.getElementById('gResultado').value;
+    seg.proximaGestion = document.getElementById('gProxima').value;
+    seg.observaciones = document.getElementById('gObs').value;
+    seg.creadoEn = new Date().toISOString();
+    sincronizarResumenGestionEstudiante(seg.codigoEstudiante);
+    await saveSeguimientos(); await saveCuentas();
+    registrarAuditoria('Gestión editada', `${seg.codigoEstudiante} · ${seg.medio} · ${seg.resultado}`);
+    closeModal(); if (onDone) onDone();
+  };
+}
+// Eliminar una gestión. Se revisa el permiso aquí también, no solo al ocultar el botón —
+// misma defensa en dos capas que se usa para cuentas críticas y actividades.
+async function eliminarGestion(seguimientoId, onDone){
+  if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+  const seg = DB.seguimientos.find(s=>s.id===seguimientoId);
+  if (!seg) return;
+  if (!confirm(`¿Eliminar esta gestión del ${seg.fecha} (${seg.medio} · ${seg.resultado})? Esta acción no se puede deshacer.`)) return;
+  DB.seguimientos = DB.seguimientos.filter(s=>s.id!==seguimientoId);
+  sincronizarResumenGestionEstudiante(seg.codigoEstudiante);
+  await saveSeguimientos([seguimientoId]); await saveCuentas();
+  registrarAuditoria('Gestión eliminada', `${seg.codigoEstudiante} · ${seg.fecha} · ${seg.medio} · ${seg.resultado}`);
+  if (onDone) onDone();
+}
+// Elimina un estudiante por completo, junto con todo lo que dependa de él (cuentas críticas,
+// abonos de esas cuentas, seguimientos, e inscripciones a actividades) — para no dejar registros
+// huérfanos apuntando a un código de estudiante que ya no existe. Solo Administrador.
+async function eliminarEstudianteCompleto(codigoEstudiante, onDone){
+  if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+  const est = estudianteByCodigo(codigoEstudiante);
+  if (!est) return;
+  const cuentasDelEst = DB.cuentas.filter(c=>c.codigoEstudiante===codigoEstudiante);
+  const cuentaIds = cuentasDelEst.map(c=>c.id);
+  const abonosDelEst = DB.abonos.filter(a=>a.codigoEstudiante===codigoEstudiante);
+  const seguimientosDelEst = DB.seguimientos.filter(s=>s.codigoEstudiante===codigoEstudiante);
+  const actividadesDelEst = DB.estudianteActividades.filter(a=>a.codigoEstudiante===codigoEstudiante);
+  const resumen = `Esto eliminará PERMANENTEMENTE a "${est.nombre}" (${codigoEstudiante}) y todo lo asociado a este estudiante:\n` +
+    `• ${cuentasDelEst.length} registro(s) de cuentas críticas\n• ${abonosDelEst.length} abono(s)\n` +
+    `• ${seguimientosDelEst.length} gestión(es) de seguimiento\n• ${actividadesDelEst.length} inscripción(es) a actividades\n\n` +
+    `Esta acción no se puede deshacer. ¿Continuar?`;
+  if (!confirm(resumen)) return;
+  DB.cuentas = DB.cuentas.filter(c=>c.codigoEstudiante!==codigoEstudiante);
+  DB.abonos = DB.abonos.filter(a=>a.codigoEstudiante!==codigoEstudiante);
+  DB.seguimientos = DB.seguimientos.filter(s=>s.codigoEstudiante!==codigoEstudiante);
+  DB.estudianteActividades = DB.estudianteActividades.filter(a=>a.codigoEstudiante!==codigoEstudiante);
+  DB.estudiantes = DB.estudiantes.filter(e=>e.codigo!==codigoEstudiante);
+  await saveCuentas(cuentaIds);
+  await saveAbonos(abonosDelEst.map(a=>a.id));
+  await saveSeguimientos(seguimientosDelEst.map(s=>s.id));
+  await saveActividades(); // estudianteActividades se guarda con dbSet directo, no necesita deletedKeys
+  await saveEstudiantes([codigoEstudiante]);
+  registrarAuditoria('Estudiante eliminado', `${codigoEstudiante} · ${est.nombre} (junto con ${cuentasDelEst.length} cuenta(s), ${abonosDelEst.length} abono(s), ${seguimientosDelEst.length} gestión(es), ${actividadesDelEst.length} actividad(es))`);
+  if (onDone) onDone();
+}
 
 function exportCSV(rows, filename){
   if (!rows.length){ alert('No hay filas para exportar.'); return; }
@@ -1691,7 +1980,7 @@ function previewReporte(rows){
       const fileInput = document.getElementById('fileRep'); if (fileInput) fileInput.value = '';
     };
     document.getElementById('confirmRep').onclick = async ()=>{
-      let importadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
+      let importadas = 0, actualizadas = 0, estCreados = 0, familiasVinculadas = 0, responsablesNuevos = 0, sinVincular = 0;
       let estudiantesModificados = false, catalogosModificados = false;
       analyzed.filter(a=>a.errs.length===0).forEach(a=>{
         const r = a.r;
@@ -1725,20 +2014,30 @@ function previewReporte(rows){
           catalogosModificados = true;
           responsablesNuevos++;
         }
-        DB.cuentas.push({
-          id: cuid(), codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
+        // Si ya existe un registro de cuenta crítica para este MISMO estudiante y este MISMO
+        // periodo, se actualiza en su lugar — nunca se duplica. El "id" se conserva para no
+        // desvincular los abonos que ya se hubieran registrado contra ese registro.
+        const cuentaExistenteIdx = DB.cuentas.findIndex(c=> normCode(c.codigoEstudiante)===normCode(r.Codigo_Estudiante) && c.periodo===r.Periodo_Reporte);
+        const datosCuenta = {
+          codigoEstudiante:r.Codigo_Estudiante, periodo:r.Periodo_Reporte, mesesAdeudados:Number(r.Meses_Adeudados),
           balanceAnioAnterior:Number(r.Balance_Anio_Anterior||0), balance:Number(r.Balance_Meses_Actuales), fechaUltimoPago:r.Fecha_Ultimo_Pago||'', montoUltimoPago:r.Monto_Ultimo_Pago||'',
           estado:r.Estado_Gestion, responsable:r.Responsable_Asignado, fechaUltimaGestion:r.Fecha_Ultima_Gestion||'',
           proximoSeguimiento:r.Proximo_Seguimiento||'', observaciones:r.Observaciones||'',
           // Respaldo: si por algún motivo el estudiante no llega a vincularse (código distinto,
           // no encontrado, etc.), el Reporte Mensual igual muestra estos datos en vez de dejarlos vacíos.
           nombreEstudianteImportado: r.Nombre_Estudiante||'', nombreFamiliaImportado: r.Nombre_Familia||'', codigoFamiliaImportado: r.Codigo_Familia||''
-        });
-        importadas++;
+        };
+        if (cuentaExistenteIdx >= 0){
+          DB.cuentas[cuentaExistenteIdx] = { ...DB.cuentas[cuentaExistenteIdx], ...datosCuenta, id: DB.cuentas[cuentaExistenteIdx].id };
+          actualizadas++;
+        } else {
+          DB.cuentas.push({ id: cuid(), ...datosCuenta });
+          importadas++;
+        }
       });
       await saveCuentas(); if (estudiantesModificados) await saveEstudiantes(); if (catalogosModificados) await saveCatalogos();
-      registrarAuditoria('Importación de reporte mensual', `${importadas} registro(s), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
-      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) de cuentas críticas añadidos al historial${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
+      registrarAuditoria('Importación de reporte mensual', `${importadas} creado(s), ${actualizadas} actualizado(s) (sin duplicar), ${estCreados} estudiante(s) creado(s), ${familiasVinculadas} vínculo(s) de familia actualizados, ${responsablesNuevos} responsable(s) nuevo(s), ${sinVincular} sin vincular a un estudiante`);
+      box.innerHTML = `<div class="note">Importación completada: ${importadas} registro(s) nuevo(s)${actualizadas?`, ${actualizadas} registro(s) ya existentes actualizados (no se duplicaron)`:''}${estCreados?`, ${estCreados} estudiante(s) creado(s) automáticamente`:''}${familiasVinculadas?`, ${familiasVinculadas} vínculo(s) con familias actualizados automáticamente por código`:''}${responsablesNuevos?`, ${responsablesNuevos} responsable(s) nuevo(s) agregados al catálogo (ya disponibles en el desplegable)`:''}. Recuerde: los abonos se registran dentro de la app, no por Excel.</div>
       ${sinVincular?`<div class="alertbox">${sinVincular} registro(s) se importaron con el nombre/familia del archivo, pero <b>no se pudieron vincular a un estudiante existente</b> (el "Codigo_Estudiante" del archivo no coincide con ninguno del sistema). Búsquelos en el Reporte Mensual con la etiqueta "⚠ No vinculado" — revise que el código coincida exactamente con el de "Estudiantes/Familias", o marque "Crear automáticamente" la próxima vez.</div>`:''}`;
     };
   }
@@ -1794,7 +2093,8 @@ function renderFichas(root){
       </tr>`;
       if (expandido){
         if (!hijos.length){
-          html += `<tr><td></td><td colspan="3" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td></tr>`;
+          html += `<tr><td></td><td colspan="2" class="small" style="color:var(--muted);">Sin estudiantes vinculados a esta familia todavía.</td>
+            <td>${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delfam="${fam.codigo}">Eliminar familia</button>`:''}</td></tr>`;
         }
         hijos.forEach(h=>{
           html += `<tr class="linklike-row" data-c="${h.codigo}" style="cursor:pointer;">
@@ -1831,6 +2131,21 @@ function renderFichas(root){
       };
     });
     document.querySelectorAll('#fichaList tr[data-c]').forEach(tr=> tr.onclick = ()=> drawDetail(tr.dataset.c));
+    document.querySelectorAll('[data-delfam]').forEach(btn=>{
+      btn.onclick = async (e)=>{
+        e.stopPropagation();
+        if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+        const codigo = btn.dataset.delfam;
+        const familia = familiaByCodigo(codigo);
+        if (!familia) return;
+        if (estudiantesDeFamilia(codigo).length){ alert('Esta familia todavía tiene estudiantes vinculados — no se puede eliminar hasta reasignarlos o eliminarlos primero.'); return; }
+        if (!confirm(`¿Eliminar la familia "${familia.responsable}" (${codigo})? Esta acción no se puede deshacer.`)) return;
+        DB.familias = DB.familias.filter(f=>f.codigo!==codigo);
+        await saveFamilias([codigo]);
+        registrarAuditoria('Familia eliminada', `${codigo} · ${familia.responsable}`);
+        drawList();
+      };
+    });
   };
   function drawDetail(codigo){
     const est = estudianteByCodigo(codigo); const fam = familiaByCodigo(est.codigoFamilia);
@@ -1842,7 +2157,11 @@ function renderFichas(root){
     document.getElementById('fichaDetail').innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:start;">
         <h2>${est.nombre} <span class="n mono">${est.codigo}</span></h2>
-        ${editable?`<div style="display:flex;gap:6px;"><button class="btn btn-sm" id="editEstBtn">Editar estudiante</button>${fam?`<button class="btn btn-sm" id="editFamBtn">Editar familia</button>`:''}</div>`:''}
+        ${editable?`<div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" id="editEstBtn">Editar estudiante</button>
+          ${fam?`<button class="btn btn-sm" id="editFamBtn">Editar familia</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" id="delEstBtn">Eliminar estudiante</button>`:''}
+        </div>`:''}
       </div>
       <div class="grid grid-2">
         <div><span class="small">Nivel</span><div>${est.nivel||'—'}</div></div>
@@ -1884,11 +2203,14 @@ function renderFichas(root){
         <table><thead><tr><th>Actividad</th><th>Periodo</th><th>Costo</th><th>Estado de pago</th><th>Fecha de pago</th>${editable?'<th></th>':''}</tr></thead>
         <tbody>${acts.length ? acts.map(a=>`<tr>
           <td>${a.actividad}</td>
-          <td class="mono">${a.periodo}</td>
-          <td class="mono">${fmtMoney(a.costo)}</td>
+          <td class="mono">${editable?`<input type="text" class="actPeriodoEdit" data-id="${a.id}" value="${a.periodo}" style="width:100px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-family:var(--font-mono);font-size:12px;">`:a.periodo}</td>
+          <td class="mono">${editable?`<input type="number" min="0" step="0.01" class="actCostoEdit" data-id="${a.id}" value="${a.costo}" style="width:90px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-family:var(--font-mono);font-size:12px;">`:fmtMoney(a.costo)}</td>
           <td>${a.pagado ? `<span class="badge b-verde"><span class="dot dot-verde"></span>Pagado</span>` : `<span class="badge b-rojo"><span class="dot dot-rojo"></span>Pendiente</span>`}</td>
           <td class="mono">${a.fechaPago||'—'}</td>
-          ${editable?`<td><button class="btn btn-sm ${a.pagado?'':'btn-primary'}" data-togglepago="${a.id}">${a.pagado?'Marcar pendiente':'Marcar pagado'}</button></td>`:''}
+          ${editable?`<td style="white-space:nowrap;">
+            <button class="btn btn-sm ${a.pagado?'':'btn-primary'}" data-togglepago="${a.id}">${a.pagado?'Marcar pendiente':'Marcar pagado'}</button>
+            ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delact="${a.id}" title="Eliminar esta actividad">✕</button>`:''}
+          </td>`:''}
         </tr>`).join('') : `<tr><td colspan="${editable?6:5}" class="empty">Sin actividades registradas.</td></tr>`}</tbody></table>
       </div>
       ${editable?`<div class="addrow">
@@ -1908,14 +2230,24 @@ function renderFichas(root){
       <div class="tablewrap" style="max-height:200px;"><table><thead><tr><th>Fecha</th><th>Periodo aplicado</th><th>Monto</th><th>Observaciones</th><th>Registrado por</th></tr></thead>
       <tbody>${abonosEst.map(a=>{ const cta = DB.cuentas.find(c=>c.id===a.cuentaId); return `<tr><td class="mono">${a.fecha}</td><td class="mono">${cta?cta.periodo:'—'}</td><td class="mono">${fmtMoney(a.monto)}</td><td class="small">${a.observaciones||''}</td><td class="small">${a.registradoPor||''}</td></tr>`; }).join('')||'<tr><td colspan="5" class="empty">Sin abonos registrados.</td></tr>'}</tbody></table></div>
       <hr class="sep">
-      <h2>Historial de seguimientos</h2>
-      <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span></div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2>Historial de seguimientos</h2>
+        ${editable ? `<button class="btn btn-sm btn-primary" id="fichaAddGestion">+ Registrar gestión</button>` : ''}
+      </div>
+      <div class="timeline">${segEst.map(s=>`<div class="tl-item"><div class="tl-date">${s.fecha} — ${s.medio}</div><div class="tl-body"><b>${s.resultado}</b><br><span class="small">${s.observaciones||''} · por ${s.creadoPor||s.responsable}</span>
+        ${editable?`<div style="margin-top:6px;"><button class="btn btn-sm" data-editgestficha="${s.id}">✏ Editar</button> ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delgestficha="${s.id}">✕ Eliminar</button>`:''}</div>`:''}
+      </div></div>`).join('') || '<span class="small">Sin gestiones registradas.</span>'}</div>
     `;
     if (editable){
       const editEstBtn = document.getElementById('editEstBtn');
       if (editEstBtn) editEstBtn.onclick = ()=> openEstudianteModal(est.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
       const editFamBtn = document.getElementById('editFamBtn');
       if (editFamBtn) editFamBtn.onclick = ()=> openFamiliaModal(fam.codigo, ()=>{ drawList(); drawDetail(est.codigo); });
+      const delEstBtn = document.getElementById('delEstBtn');
+      if (delEstBtn) delEstBtn.onclick = ()=> eliminarEstudianteCompleto(est.codigo, ()=>{
+        drawList();
+        document.getElementById('fichaDetail').innerHTML = '<div class="empty">Estudiante eliminado. Seleccione otra familia o estudiante.</div>';
+      });
       const actAdd = document.getElementById('actAdd');
       if (actAdd) actAdd.onclick = async ()=>{
         const periodoVal = document.getElementById('actPeriodo').value.trim();
@@ -1940,8 +2272,48 @@ function renderFichas(root){
           drawDetail(est.codigo);
         };
       });
+      root.querySelectorAll('.actCostoEdit').forEach(inp=>{
+        inp.onchange = async ()=>{
+          const ea = DB.estudianteActividades.find(x=>x.id===inp.dataset.id);
+          if (!ea) return;
+          ea.costo = Number(inp.value||0);
+          await saveActividades();
+          registrarAuditoria('Costo de actividad editado', `${est.codigo} · ${ea.actividad} · ${ea.periodo} · ${fmtMoney(ea.costo)}`);
+        };
+      });
+      root.querySelectorAll('.actPeriodoEdit').forEach(inp=>{
+        inp.onchange = async ()=>{
+          const ea = DB.estudianteActividades.find(x=>x.id===inp.dataset.id);
+          if (!ea) return;
+          const nuevo = inp.value.trim();
+          if (!nuevo){ alert('El periodo no puede quedar vacío.'); inp.value = ea.periodo; return; }
+          ea.periodo = nuevo;
+          await saveActividades();
+          registrarAuditoria('Periodo de actividad editado', `${est.codigo} · ${ea.actividad} · ${nuevo}`);
+        };
+      });
+      root.querySelectorAll('[data-delact]').forEach(btn=>{
+        btn.onclick = async ()=>{
+          if (!perm('eliminarRegistros')){ alert('Su rol no tiene permiso para eliminar registros. Solo el Administrador puede hacerlo.'); return; }
+          const ea = DB.estudianteActividades.find(x=>x.id===btn.dataset.delact);
+          if (!ea) return;
+          if (!confirm(`¿Eliminar la actividad "${ea.actividad}" (${ea.periodo}) de este estudiante? Esta acción no se puede deshacer.`)) return;
+          DB.estudianteActividades = DB.estudianteActividades.filter(x=>x.id!==ea.id);
+          await saveActividades();
+          registrarAuditoria('Actividad eliminada', `${est.codigo} · ${ea.actividad} · ${ea.periodo}`);
+          drawDetail(est.codigo);
+        };
+      });
       const addAbonoBtn = document.getElementById('fichaAddAbono');
       if (addAbonoBtn) addAbonoBtn.onclick = ()=> openAbonoModal(cuentasEst[0].id, ()=> drawDetail(est.codigo));
+      const addGestionBtn = document.getElementById('fichaAddGestion');
+      if (addGestionBtn) addGestionBtn.onclick = ()=> openGestionModal(cuentasEst[0]?cuentasEst[0].id:null, ()=> drawDetail(est.codigo), est.codigo);
+      root.querySelectorAll('[data-editgestficha]').forEach(btn=>{
+        btn.onclick = ()=> openEditarGestionModal(btn.dataset.editgestficha, ()=> drawDetail(est.codigo));
+      });
+      root.querySelectorAll('[data-delgestficha]').forEach(btn=>{
+        btn.onclick = ()=> eliminarGestion(btn.dataset.delgestficha, ()=> drawDetail(est.codigo));
+      });
     }
   }
   search.oninput = drawList;
@@ -2047,9 +2419,12 @@ function renderHistorial(root){
       <div class="field"><label>Responsable</label><select id="hResp"><option value="">Todos</option>${DB.catalogos.responsables.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <div class="field"><label>Medio</label><select id="hMedio"><option value="">Todos</option>${DB.catalogos.mediosContacto.map(r=>`<option>${r}</option>`).join('')}</select></div>
       <div class="field"><label>Resultado</label><select id="hResultado"><option value="">Todos</option>${DB.catalogos.resultadosGestion.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="hExport">⭳ Exportar historial</button></div>
     </div>
-    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th></tr></thead><tbody id="hBody"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Estudiante</th><th>Familia</th><th>Responsable</th><th>Medio</th><th>Resultado</th><th>Próxima gestión</th><th>Observaciones</th><th>Registrado por</th><th></th></tr></thead><tbody id="hBody"></tbody></table></div>
   `;
+  const puedeEditar = perm('editarFicha');
+  let filasActuales = [];
   const draw = ()=>{
     const q = (document.getElementById('hSearch').value||'').toLowerCase();
     const resp = document.getElementById('hResp').value, medio = document.getElementById('hMedio').value, resultado = document.getElementById('hResultado').value;
@@ -2058,14 +2433,36 @@ function renderHistorial(root){
     if (resp) rows = rows.filter(s=>s.responsable===resp);
     if (medio) rows = rows.filter(s=>s.medio===medio);
     if (resultado) rows = rows.filter(s=>s.resultado===resultado);
+    filasActuales = rows;
     document.getElementById('hBody').innerHTML = rows.map(s=>{
       const est = estudianteByCodigo(s.codigoEstudiante);
-      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td></tr>`;
-    }).join('') || `<tr><td colspan="8" class="empty">Sin gestiones registradas.</td></tr>`;
+      const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
+      return `<tr><td class="mono">${s.fecha}</td><td>${est?est.nombre:s.codigoEstudiante}</td><td>${fam?fam.responsable:''}</td><td>${s.responsable}</td><td>${s.medio}</td><td>${s.resultado}</td><td class="mono">${s.proximaGestion||'—'}</td><td class="small">${s.observaciones||''}</td><td class="small">${s.creadoPor||''}</td>
+        <td style="white-space:nowrap;">
+          ${puedeEditar?`<button class="btn btn-sm" data-editgest="${s.id}">✏</button>`:''}
+          ${perm('eliminarRegistros')?`<button class="btn btn-sm btn-danger" data-delgest="${s.id}">✕</button>`:''}
+        </td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="10" class="empty">Sin gestiones registradas.</td></tr>`;
+    root.querySelectorAll('[data-editgest]').forEach(btn=>{
+      btn.onclick = ()=> openEditarGestionModal(btn.dataset.editgest, draw);
+    });
+    root.querySelectorAll('[data-delgest]').forEach(btn=>{
+      btn.onclick = ()=> eliminarGestion(btn.dataset.delgest, draw);
+    });
   };
   ['hSearch','hResp','hMedio','hResultado'].forEach(id=>{
     const el = document.getElementById(id); el.addEventListener(id==='hSearch'?'input':'change', draw);
   });
+  document.getElementById('hExport').onclick = ()=> exportCSV(filasActuales.map(s=>{
+    const est = estudianteByCodigo(s.codigoEstudiante);
+    const fam = est ? familiaByCodigo(est.codigoFamilia) : null;
+    return {
+      Fecha:s.fecha, Codigo_Estudiante:s.codigoEstudiante, Estudiante:est?est.nombre:'', Familia:fam?fam.responsable:'',
+      Responsable:s.responsable, Medio:s.medio, Resultado:s.resultado, Proxima_Gestion:s.proximaGestion||'',
+      Observaciones:s.observaciones||'', Registrado_Por:s.creadoPor||''
+    };
+  }), `historial_seguimiento_${new Date().toISOString().slice(0,10)}.csv`);
   draw();
 }
 
@@ -2258,7 +2655,7 @@ function renderBaseDeDatos(root){
       Conectar un proyecto de <b>Supabase</b> (gratis) le da a este sistema una base de datos real compartida entre
       todos los dispositivos, con guardado seguro y verificado. Es opcional — si no lo configura, la app sigue
       funcionando con Nube de Claude.ai / IndexedDB / localStorage como hasta ahora.
-      Vea <b>ARQUITECTURA_Y_ESCALABILIDAD.md</b> para el paso a paso de crear el proyecto y el script SQL necesario.
+      Vea <b>LEEME_ESTA_ENTREGA.md</b> para el paso a paso de crear el proyecto, el script SQL y la Edge Function necesarios.
     </div>
     <div class="card">
       <h2>Estado actual</h2>
@@ -2323,20 +2720,42 @@ function renderBaseDeDatos(root){
     if (!r.ok){
       if (!confirm('La prueba de conexión falló: ' + r.error + '\n\n¿Guardar de todas formas? (puede corregirlo después)')) return;
     }
+    const modoAnterior = STORAGE_MODE;
     const usuariosLocalesPrevios = DB.usuarios.slice();
+    const correoActual = SESSION.correo;
     await guardarConfigSupabase(url, key);
     await verificarAlmacenamiento();
-    await recargarDatosDeNegocio();
-    // Si es la primera vez que se conecta este proyecto (todavía no tiene usuarios),
-    // se lleva la(s) cuenta(s) local(es) — típicamente el Administrador que acaba de conectar —
-    // para que quede sembrada la base compartida y otros dispositivos puedan iniciar sesión.
-    let usuariosMigrados = 0;
-    if (DB.usuarios.length === 0 && usuariosLocalesPrevios.length > 0){
-      DB.usuarios = usuariosLocalesPrevios;
-      await saveUsuarios();
-      usuariosMigrados = usuariosLocalesPrevios.length;
+
+    if (STORAGE_MODE === 'supabase' && modoAnterior !== 'supabase'){
+      // Se conecta por primera vez desde un dispositivo que tenía cuentas locales: si el
+      // proyecto de Supabase está vacío, se siembra con esas cuentas (ya traen su hash real)
+      // y seguimos con sesión iniciada; si ya tiene cuentas, solo se recarga desde allá.
+      DB.usuarios = [];
+      const hayUsuarios = await kvConsultarEstadoUsuarios().catch(()=>true);
+      let usuariosMigrados = 0;
+      if (!hayUsuarios && usuariosLocalesPrevios.length > 0){
+        const mig = await kvMigrarUsuariosLocales(usuariosLocalesPrevios, correoActual);
+        SESSION_TOKEN = mig.token;
+        usuariosMigrados = usuariosLocalesPrevios.length;
+      } else {
+        alert('Este proyecto de Supabase ya tiene cuentas propias. Debe iniciar sesión con una de ellas — se cerrará esta sesión local.');
+        cerrarSesion('');
+        return;
+      }
+      await recargarDatosDeNegocio();
+      await sembrarDatosDeMuestraSiEsNecesario();
+      registrarAuditoria('Base de datos Supabase configurada', url + (usuariosMigrados ? ` · ${usuariosMigrados} cuenta(s) de usuario migradas` : ''));
+    } else if (STORAGE_MODE === 'supabase'){
+      // Ya se estaba usando Supabase y se cambió a OTRO proyecto distinto: el token de sesión
+      // actual no sirve ahí (es de otro proyecto), así que no hay forma de seguir autenticado
+      // sin la contraseña. Se cierra la sesión y se pide iniciar sesión de nuevo en el proyecto nuevo.
+      alert('Se conectó a un proyecto de Supabase distinto. Por seguridad debe iniciar sesión de nuevo allí (o crear el Administrador, si está vacío).');
+      cerrarSesion('');
+      return;
+    } else {
+      await recargarDatosDeNegocio();
+      registrarAuditoria('Base de datos Supabase configurada', url + ' (no se pudo confirmar conexión; revise la configuración)');
     }
-    registrarAuditoria('Base de datos Supabase configurada', url + (usuariosMigrados ? ` · ${usuariosMigrados} cuenta(s) de usuario migradas` : ''));
     renderAll();
   };
   const btnDesc = document.getElementById('sbDesconectar');
@@ -2344,6 +2763,7 @@ function renderBaseDeDatos(root){
     if (!confirm('¿Desconectar Supabase? La app volverá a usar Nube de Claude.ai / IndexedDB / localStorage — que puede tener datos distintos a los de Supabase. Sus datos en Supabase NO se borran, solo deja de usarlos esta app.')) return;
     await borrarConfigSupabase();
     await verificarAlmacenamiento();
+    SESSION_TOKEN = null;
     await recargarDatosDeNegocio();
     registrarAuditoria('Base de datos Supabase desconectada', '');
     renderAll();
@@ -2486,11 +2906,27 @@ function iniciarControlDeInactividad(){
   resetTimer();
 }
 
+// Decide si se debe mostrar "Configuración inicial" (crear el primer Administrador) o la
+// pantalla normal de acceso. En modo Supabase, DB.usuarios ya no se carga antes de iniciar
+// sesión (ver loadAll), así que esa decisión se basa en lo que respondió kv-proxy ("estado").
+function pasoInicialLogin(){
+  if (STORAGE_MODE === 'supabase') return (DB._hayUsuariosSupabase === false) ? 'setup-admin' : 'login';
+  return DB.usuarios.length===0 ? 'setup-admin' : 'login';
+}
 function cerrarSesion(mensaje){
   if (SESSION.authenticated) registrarAuditoria('Cierre de sesión', SESSION.correo||SESSION.usuario||'');
+  if (STORAGE_MODE === 'supabase'){
+    kvLogout();
+    SESSION_TOKEN = null;
+    // Sin sesión no hay token, y sin token kv-proxy no entrega nada — se limpia también la
+    // copia en memoria para que no queden datos de la familia/estudiantes/cuentas de la
+    // sesión anterior visibles en un dispositivo compartido.
+    DB.familias = []; DB.estudiantes = []; DB.actividades = []; DB.estudianteActividades = [];
+    DB.cuentas = []; DB.seguimientos = []; DB.abonos = []; DB.auditoria = []; DB.usuarios = [];
+  }
   SESSION = { usuario:null, rol:null, correo:null, authenticated:false };
   currentView = 'dashboard';
-  loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok: mensaje||'', pendingUser:null };
+  loginState = { step: pasoInicialLogin(), error:'', ok: mensaje||'', pendingUser:null };
   document.querySelector('.app').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   renderLogin();
@@ -2523,6 +2959,7 @@ function renderLogin(){
         <div><div>Cuentas Críticas</div><div>Gestión de Cobros — Dirección</div></div>
       </div>
       ${inner}
+      <p class="small mono" style="text-align:center;color:var(--muted);margin-top:18px;">v${APP_VERSION}</p>
     </div>`;
 
   /* ---------- Asistente de primer uso: crear el Administrador real ---------- */
@@ -2553,14 +2990,26 @@ function renderLogin(){
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)){ loginState.error='Ingrese un correo electrónico válido.'; renderLogin(); return; }
       if (pass.length < 6){ loginState.error='La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
       if (pass !== pass2){ loginState.error='Las contraseñas no coinciden.'; renderLogin(); return; }
-      const nuevoAdmin = {
-        nombre, correo, rol:'admin', passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
-        intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:new Date().toISOString(), creadoEl:new Date().toISOString()
-      };
-      DB.usuarios.push(nuevoAdmin);
-      await saveUsuarios();
-      registrarAuditoria('Configuración inicial', 'Cuenta de Administrador creada: ' + correo);
-      SESSION = { usuario:nuevoAdmin.nombre, rol:'admin', correo:nuevoAdmin.correo, authenticated:true };
+      const btnSu = document.getElementById('suSubmit'); btnSu.disabled = true; btnSu.textContent = 'Creando…';
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvSetupAdmin(nombre, correo, pass, pregunta, respuesta); }
+        catch(e){ loginState.error = e && e.message || 'No se pudo crear la cuenta.'; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        await sembrarDatosDeMuestraSiEsNecesario();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+      } else {
+        const nuevoAdmin = {
+          nombre, correo, rol:'admin', passwordHash: await hashText(pass), pregunta, respuestaHash: await hashText(respuesta),
+          intentosFallidos:0, bloqueadoHasta:null, ultimoAcceso:new Date().toISOString(), creadoEl:new Date().toISOString()
+        };
+        DB.usuarios.push(nuevoAdmin);
+        await saveUsuarios();
+        registrarAuditoria('Configuración inicial', 'Cuenta de Administrador creada: ' + correo);
+        SESSION = { usuario:nuevoAdmin.nombre, rol:'admin', correo:nuevoAdmin.correo, authenticated:true };
+      }
       loginState = { step:'login', error:'', ok:'', pendingUser:null };
       document.getElementById('loginScreen').style.display = 'none';
       document.querySelector('.app').style.display = 'grid';
@@ -2592,8 +3041,13 @@ function renderLogin(){
       if (!r.ok){ loginState.error = r.error; renderLogin(); return; }
       await guardarConfigSupabase(url, key);
       await verificarAlmacenamiento();
-      await recargarDatosDeNegocio();
-      loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'Conectado. Ahora puede iniciar sesión con las cuentas de su equipo.', pendingUser:null };
+      if (STORAGE_MODE === 'supabase'){
+        DB.usuarios = [];
+        try{ DB._hayUsuariosSupabase = await kvConsultarEstadoUsuarios(); }catch(e){ DB._hayUsuariosSupabase = null; }
+      } else {
+        await recargarDatosDeNegocio();
+      }
+      loginState = { step: pasoInicialLogin(), error:'', ok:'Conectado. Ahora puede iniciar sesión con las cuentas de su equipo.', pendingUser:null };
       renderLogin();
     };
     return;
@@ -2621,6 +3075,27 @@ function renderLogin(){
       const email = (document.getElementById('loEmail').value||'').trim().toLowerCase();
       const pass = document.getElementById('loPass').value||'';
       if (!email || !pass){ loginState.error = 'Ingrese correo y contraseña.'; loginState.ok=''; renderLogin(); return; }
+
+      if (STORAGE_MODE === 'supabase'){
+        // La verificación de la contraseña ahora corre en el servidor (kv-proxy): el navegador
+        // nunca recibe la lista de usuarios con sus contraseñas antes de iniciar sesión.
+        const btnLo = document.getElementById('loSubmit'); btnLo.disabled = true; btnLo.textContent = 'Ingresando…';
+        let r;
+        try{ r = await kvLogin(email, pass); }
+        catch(e){ loginState.error = (e && e.message) || 'No se pudo iniciar sesión.'; loginState.ok=''; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+        loginState = { step:'login', error:'', ok:'', pendingUser:null };
+        document.getElementById('loginScreen').style.display = 'none';
+        document.querySelector('.app').style.display = 'grid';
+        currentView = 'dashboard';
+        renderAll();
+        iniciarControlDeInactividad();
+        return;
+      }
+
       const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
       if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; loginState.ok=''; renderLogin(); return; }
 
@@ -2674,8 +3149,16 @@ function renderLogin(){
       <div class="login-actions"><button class="btn btn-primary" id="frSubmit">Continuar</button></div>
     `);
     document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
-    document.getElementById('frSubmit').onclick = ()=>{
+    document.getElementById('frSubmit').onclick = async ()=>{
       const email = (document.getElementById('frEmail').value||'').trim().toLowerCase();
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvRecuperarPregunta(email); }
+        catch(e){ loginState.error = (e && e.message) || 'No existe una cuenta con ese correo.'; renderLogin(); return; }
+        loginState = { step:'forgot-question', error:'', ok:'', pendingUser:{ correo: email, pregunta: r.pregunta } };
+        renderLogin();
+        return;
+      }
       const user = DB.usuarios.find(u=>u.correo.toLowerCase()===email);
       if (!user){ loginState.error = 'No existe una cuenta con ese correo.'; renderLogin(); return; }
       loginState = { step:'forgot-question', error:'', ok:'', pendingUser:user };
@@ -2696,6 +3179,14 @@ function renderLogin(){
     document.getElementById('loBack').onclick = ()=>{ loginState = {step:'login', error:'', ok:'', pendingUser:null}; renderLogin(); };
     document.getElementById('frCheck').onclick = async ()=>{
       const resp = document.getElementById('frResp').value||'';
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvVerificarRespuesta(user.correo, resp); }
+        catch(e){ loginState.error = (e && e.message) || 'La respuesta no coincide.'; renderLogin(); return; }
+        loginState = { step:'forgot-reset', error:'', ok:'', pendingUser:{ correo:user.correo, resetToken:r.resetToken } };
+        renderLogin();
+        return;
+      }
       const hash = await hashText(resp);
       if (hash !== user.respuestaHash){ loginState.error = 'La respuesta no coincide. Intente de nuevo o pida a un Administrador que restablezca su clave.'; renderLogin(); return; }
       loginState = { step:'forgot-reset', error:'', ok:'', pendingUser:user };
@@ -2718,6 +3209,24 @@ function renderLogin(){
       const p2 = document.getElementById('frNewPass2').value||'';
       if (p1.length < 6){ loginState.error = 'La contraseña debe tener al menos 6 caracteres.'; renderLogin(); return; }
       if (p1 !== p2){ loginState.error = 'Las contraseñas no coinciden.'; renderLogin(); return; }
+
+      if (STORAGE_MODE === 'supabase'){
+        let r;
+        try{ r = await kvResetearPassword(user.correo, user.resetToken, p1); }
+        catch(e){ loginState.error = (e && e.message) || 'No se pudo restablecer la contraseña.'; renderLogin(); return; }
+        SESSION_TOKEN = r.token;
+        await recargarDatosDeNegocio();
+        // La auditoría de este evento ya la escribió kv-proxy del lado del servidor.
+        SESSION = { usuario:r.usuario.nombre, rol:r.usuario.rol, correo:r.usuario.correo, authenticated:true };
+        loginState = { step:'login', error:'', ok:'', pendingUser:null };
+        document.getElementById('loginScreen').style.display = 'none';
+        document.querySelector('.app').style.display = 'grid';
+        currentView = 'dashboard';
+        renderAll();
+        iniciarControlDeInactividad();
+        return;
+      }
+
       user.passwordHash = await hashText(p1);
       user.intentosFallidos = 0; user.bloqueadoHasta = null; user.ultimoAcceso = new Date().toISOString();
       await saveUsuarios();
@@ -2741,7 +3250,7 @@ function renderLogin(){
     await loadAll();
     document.querySelector('.app').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
-    loginState = { step: DB.usuarios.length===0 ? 'setup-admin' : 'login', error:'', ok:'', pendingUser:null };
+    loginState = { step: pasoInicialLogin(), error:'', ok:'', pendingUser:null };
     renderLogin();
   }catch(err){
     document.getElementById('loginScreen').style.display = 'flex';

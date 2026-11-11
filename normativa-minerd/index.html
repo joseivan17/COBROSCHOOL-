@@ -972,7 +972,25 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   }
   function entrar(){ applyRole(); if($("#userChip")){$("#userChip").hidden=false;$("#userChip").textContent=CURRENT.nombre+" · "+CURRENT.rol;} if($("#logoutBtn"))$("#logoutBtn").hidden=false;
     if($("#roleSwitch")){ $("#roleSwitch").hidden = (MODE!=="demo"); $("#roleSwitch").value=CURRENT.rol; }
-    show("s-menu"); }
+    if(MODE==="live"){ cargarDatos().then(function(){ show("s-menu"); }); } else { show("s-menu"); }
+  }
+  // Carga los datos reales desde Supabase (persistencia). Si falla, conserva lo que haya.
+  function cargarDatos(){
+    if(MODE!=="live"||!sbClient) return Promise.resolve();
+    return Promise.all([
+      sbClient.from("estudiantes").select("*"),
+      sbClient.from("casos").select("*"),
+      sbClient.from("incidencias").select("*"),
+      sbClient.from("documentos_estudiante").select("*")
+    ]).then(function(res){
+      var es=res[0]&&res[0].data, cs=res[1]&&res[1].data, is=res[2]&&res[2].data, ds=res[3]&&res[3].data;
+      if(es){ ESTUDIANTES.length=0; es.forEach(function(r){ ESTUDIANTES.push({matricula:r.matricula||r.codigo||"",nombre:r.nombre||"",nivel:r.nivel||"",curso:r.grado||"",seccion:r.seccion||"",genero:r.genero||"",tutor:r.tutor||"",tel:r.telefono||"",nee:r.nee||"",neep:r.neep||"",dbid:r.id}); }); }
+      function nombreDe(cod){ var s=ESTUDIANTES.filter(function(x){return x.matricula===cod;})[0]; return s?s.nombre:(cod||""); }
+      if(cs){ CASOS.length=0; cs.forEach(function(r){ CASOS.push({id:NEXT_CASO++,dbid:r.id,fecha:r.fecha_hecho||String(r.creado_en||"").slice(0,10),curso:r.curso||"",gradoRegistro:r.grado_registro||r.curso||"",cod:r.estudiante_cod||"",nombre:nombreDe(r.estudiante_cod),tipo:r.tipo_caso||"",clasif:r.clasificacion||"leve",estado:r.estado||"abierto",origen:(r.origen==="referido"?"Referido desde incidencia":(r.origen==="directo"?"Directo":(r.origen||"Directo"))),desc:r.descripcion||"",accDoc:r.acciones_docente||"",accCoord:r.acciones_coordinador||"",accPsico:r.acciones_psicologo||"",acuerdo:r.acuerdo||"",familia:!!r.contacto_familia,seguimiento:r.requiere_seguimiento!==false,notas:r.notas_seguimiento||"",analisis:r.analisis||"",refExterno:!!r.ref_externo,refExternoFecha:r.ref_externo_fecha||"",referimiento:r.referimiento||null,visto:true}); }); }
+      if(is){ INCID.length=0; is.forEach(function(r){ INCID.push({id:NEXT_INCID++,dbid:r.id,fecha:r.fecha||String(r.creado_en||"").slice(0,10),curso:r.curso||"",cod:r.estudiante_cod||"",nombre:nombreDe(r.estudiante_cod),tipo:r.tipo||"",nivel:r.nivel||"leve",lugar:r.lugar||"",desc:r.descripcion||"",accDoc:r.acciones_docente||"",accCoord:r.acciones_coordinador||"",familia:!!r.notifico_familia,estado:r.estado||"Registrado",referido:!!r.referido,casoId:null,reportadoPor:r.reportado_nombre||""}); }); }
+      if(ds){ for(var k in DOCS_EST) delete DOCS_EST[k]; ds.forEach(function(r){ var mat=r.estudiante_cod||""; (DOCS_EST[mat]=DOCS_EST[mat]||[]).push({id:"d"+r.id,nombre:r.nombre||"documento",tipo:r.tipo||"Otro",fecha:String(r.creado_en||"").slice(0,10),size:r.tamano_bytes?fmtSize(r.tamano_bytes):"",path:r.archivo_path||""}); }); }
+    }).catch(function(e){ toast("Aviso de carga","No se pudieron cargar todos los datos desde Supabase. Revisa las políticas (RLS) y la institución del usuario. ("+((e&&e.message)||e)+")"); });
+  }
   function doLogout(){ if(MODE==="live"&&sbClient){try{sbClient.auth.signOut();}catch(e){}} MODE="demo"; resetLegal(); if($("#userChip"))$("#userChip").hidden=true; if($("#logoutBtn"))$("#logoutBtn").hidden=true; if($("#roleSwitch"))$("#roleSwitch").hidden=true; show("s-login"); }
   if($("#roleSwitch")) $("#roleSwitch").addEventListener("change",function(){ CURRENT.rol=this.value; CURRENT.nombre="Demo ("+this.value+")"; applyRole(); if($("#userChip"))$("#userChip").textContent=CURRENT.nombre+" · "+CURRENT.rol; show("s-menu"); });
 
@@ -1878,11 +1896,18 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   }
   if($("#i-save")) $("#i-save").addEventListener("click",function(){
     if(!$("#i-cod").value.trim()) return toast("Falta el estudiante","Escribe el código del estudiante.");
-    INCID.unshift({id:NEXT_INCID++,fecha:$("#i-fecha").value.trim()||today(),curso:$("#i-curso").value.trim(),cod:$("#i-cod").value.trim(),nombre:$("#i-nom").value.trim(),tipo:$("#i-tipo").value,nivel:$("#i-nivel").value,lugar:$("#i-lugar").value.trim(),desc:$("#i-desc").value.trim(),accDoc:$("#i-accdoc").value.trim(),accCoord:$("#i-acccoord").value.trim(),familia:$("#i-fam").checked,estado:"Registrado",referido:false,casoId:null});
+    var x={id:NEXT_INCID++,fecha:$("#i-fecha").value.trim()||today(),curso:$("#i-curso").value.trim(),cod:$("#i-cod").value.trim(),nombre:$("#i-nom").value.trim(),tipo:$("#i-tipo").value,nivel:$("#i-nivel").value,lugar:$("#i-lugar").value.trim(),desc:$("#i-desc").value.trim(),accDoc:$("#i-accdoc").value.trim(),accCoord:$("#i-acccoord").value.trim(),familia:$("#i-fam").checked,estado:"Registrado",referido:false,casoId:null};
+    INCID.unshift(x); guardarIncid(x);
     ["i-nom","i-curso","i-cod","i-fecha","i-lugar","i-desc","i-accdoc","i-acccoord"].forEach(function(id){$("#"+id).value="";});$("#i-fam").checked=false;
     renderIncid(); toast("Incidencia registrada","Se agregó a las incidencias recientes.");
   });
   document.addEventListener("click",function(e){ var r=e.target.closest(".i-ref"); if(r){ referIncidencia(+r.getAttribute("data-ref")); } });
+  // Guarda una incidencia en Supabase (persistencia) y enlaza su id de base de datos.
+  function guardarIncid(x){
+    if(MODE!=="live"||!sbClient) return;
+    var payload={institucion_id:CURRENT.institucion,estudiante_cod:x.cod,curso:x.curso,fecha:x.fecha||today(),tipo:x.tipo,nivel:x.nivel,lugar:x.lugar||"",descripcion:x.desc||"",acciones_docente:x.accDoc||"",acciones_coordinador:x.accCoord||"",notifico_familia:!!x.familia,estado:x.estado,referido:!!x.referido,reportado_nombre:x.reportadoPor||null};
+    Promise.resolve(sbClient.from("incidencias").insert(payload).select("id").single()).then(function(r){ if(r&&r.data)x.dbid=r.data.id; else if(r&&r.error)toast("No se guardó en Supabase",r.error.message); });
+  }
   // ----- Reporte del docente a Coordinación -----
   function estadoReportePill(x){
     if(x.referido){ var c=CASOS.filter(function(k){return k.id===x.casoId;})[0]; return '<span class="pill" style="background:transparent;color:var(--pri-3);border:1px solid var(--pri-3)">Referido a Orientación</span>'+(c?" "+estadoPill(c.estado):""); }
@@ -1902,7 +1927,8 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   }
   if($("#rp-save")) $("#rp-save").addEventListener("click",function(){
     if(!$("#rp-cod").value.trim()&&!$("#rp-nom").value.trim()) return toast("Falta el estudiante","Busca al estudiante por nombre o matrícula.");
-    INCID.unshift({id:NEXT_INCID++,fecha:$("#rp-fecha").value.trim()||today(),curso:$("#rp-curso").value.trim(),cod:$("#rp-cod").value.trim(),nombre:$("#rp-nom").value.trim(),tipo:$("#rp-tipo").value,nivel:$("#rp-nivel").value,lugar:"",desc:$("#rp-desc").value.trim(),accDoc:$("#rp-accion").value.trim(),accCoord:"",familia:$("#rp-fam").checked,estado:"Reportado a Coordinación",referido:false,casoId:null,reportadoPor:CURRENT.nombre});
+    var rx={id:NEXT_INCID++,fecha:$("#rp-fecha").value.trim()||today(),curso:$("#rp-curso").value.trim(),cod:$("#rp-cod").value.trim(),nombre:$("#rp-nom").value.trim(),tipo:$("#rp-tipo").value,nivel:$("#rp-nivel").value,lugar:"",desc:$("#rp-desc").value.trim(),accDoc:$("#rp-accion").value.trim(),accCoord:"",familia:$("#rp-fam").checked,estado:"Reportado a Coordinación",referido:false,casoId:null,reportadoPor:CURRENT.nombre};
+    INCID.unshift(rx); guardarIncid(rx);
     ["rp-nom","rp-curso","rp-cod","rp-fecha","rp-desc","rp-accion"].forEach(function(id){$("#"+id).value="";});$("#rp-fam").checked=false;
     renderMisReportes();
     toast("Reporte enviado","El coordinador recibió tu reporte. Podrás seguir su estado aquí abajo.");
@@ -2029,21 +2055,28 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     rd.onload=function(ev){
       var doc={id:"d"+Date.now()+Math.floor(Math.random()*1000),nombre:file.name,tipo:($("#eh-doc-tipo")?$("#eh-doc-tipo").value:"Otro"),fecha:today(),size:fmtSize(file.size),dataUrl:ev.target.result};
       (DOCS_EST[mat]=DOCS_EST[mat]||[]).unshift(doc);
-      if(MODE==="live"&&sbClient){ try{ var path=CURRENT.institucion+"/estudiantes/"+mat+"/"+Date.now()+"_"+file.name; sbClient.storage.from("documentos").upload(path,file,{upsert:true}); doc.path=path; }catch(e){} }
+      if(MODE==="live"&&sbClient){ try{ var path=CURRENT.institucion+"/estudiantes/"+mat+"/"+Date.now()+"_"+file.name; Promise.resolve(sbClient.storage.from("documentos").upload(path,file,{upsert:true})).then(function(){ sbClient.from("documentos_estudiante").insert({institucion_id:CURRENT.institucion,estudiante_cod:mat,tipo:doc.tipo,nombre:doc.nombre,archivo_path:path,tamano_bytes:file.size}); }); doc.path=path; }catch(e){} }
       renderEstHistorial();
       toast("Documento adjuntado","Se agregó “"+esc(file.name)+"” al estudiante.");
     };
     rd.readAsDataURL(file);
   }
   function descargarArchivo(doc){
-    try{ var a=document.createElement("a"); a.href=doc.dataUrl; a.download=doc.nombre; document.body.appendChild(a); a.click(); a.remove(); }catch(e){}
-    toast("Documento","Si la descarga no inicia es porque la vista previa la bloquea; funciona en la versión hospedada.");
+    if(doc.dataUrl){ try{ var a=document.createElement("a"); a.href=doc.dataUrl; a.download=doc.nombre; document.body.appendChild(a); a.click(); a.remove(); }catch(e){} return; }
+    if(doc.path && MODE==="live" && sbClient){
+      Promise.resolve(sbClient.storage.from("documentos").createSignedUrl(doc.path,120)).then(function(r){
+        if(r&&r.data&&r.data.signedUrl){ window.open(r.data.signedUrl,"_blank"); }
+        else { toast("No se pudo abrir","Revisa el bucket «documentos» y sus políticas."); }
+      }); return;
+    }
+    toast("Documento","El archivo no está disponible en esta sesión. En la versión hospedada se descarga desde Supabase.");
   }
   function addHistorial(){
     var s=ESTUDIANTES.filter(function(x){return x.matricula===EST_VIEW;})[0]; if(!s)return;
     var tipo=$("#eh-add-tipo").value, fecha=$("#eh-add-fecha").value.trim()||today(), asunto=$("#eh-add-reg").value.trim()||"(sin asunto)", nivel=$("#eh-add-nivel").value, desc=$("#eh-add-desc").value.trim();
-    if(tipo==="Caso"){ CASOS.unshift({id:NEXT_CASO++,fecha:fecha,curso:s.curso,gradoRegistro:s.curso,cod:s.matricula,nombre:s.nombre,tipo:asunto,clasif:nivel,estado:"abierto",origen:"Directo",desc:desc,accDoc:"",accCoord:"",accPsico:"",acuerdo:"",familia:false,seguimiento:true,notas:"Agregado al historial"}); }
-    else { INCID.unshift({id:NEXT_INCID++,fecha:fecha,curso:s.curso,cod:s.matricula,nombre:s.nombre,tipo:asunto,nivel:nivel,lugar:"",desc:desc,accDoc:"",accCoord:"",familia:false,estado:"Registrado",referido:false,casoId:null}); }
+    if(tipo==="Caso"){ var c={id:NEXT_CASO++,fecha:fecha,curso:s.curso,gradoRegistro:s.curso,cod:s.matricula,nombre:s.nombre,tipo:asunto,clasif:nivel,estado:"abierto",origen:"Directo",desc:desc,accDoc:"",accCoord:"",accPsico:"",acuerdo:"",familia:false,seguimiento:true,notas:"Agregado al historial"}; CASOS.unshift(c);
+      if(MODE==="live"&&sbClient){ Promise.resolve(sbClient.from("casos").insert({institucion_id:CURRENT.institucion,estudiante_cod:c.cod,curso:c.curso,grado_registro:c.gradoRegistro,fecha_hecho:c.fecha,tipo_caso:c.tipo,clasificacion:c.clasif,estado:c.estado,origen:"directo",descripcion:c.desc}).select("id").single()).then(function(r){ if(r&&r.data)c.dbid=r.data.id; }); } }
+    else { var x={id:NEXT_INCID++,fecha:fecha,curso:s.curso,cod:s.matricula,nombre:s.nombre,tipo:asunto,nivel:nivel,lugar:"",desc:desc,accDoc:"",accCoord:"",familia:false,estado:"Registrado",referido:false,casoId:null}; INCID.unshift(x); guardarIncid(x); }
     renderEstHistorial(); toast("Historial actualizado","Se agregó un registro de tipo "+tipo+" al estudiante.");
   }
   function nextGrado(cu){
@@ -2101,8 +2134,9 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     if(!mat) return toast("Matrícula obligatoria","La matrícula identifica a cada estudiante.");
     if(!nom) return toast("Falta el nombre","Escribe el nombre completo.");
     if(ESTUDIANTES.some(function(s){return s.matricula===mat;})) return toast("Matrícula duplicada","Ya existe un estudiante con esa matrícula.");
-    ESTUDIANTES.push({matricula:mat,nombre:nom,nivel:$("#est-nivel").value,curso:$("#est-curso").value.trim(),seccion:"",genero:"",tutor:$("#est-tutor").value.trim(),tel:$("#est-tel").value.trim()});
-    if(MODE==="live"&&sbClient){ sbClient.from("estudiantes").insert({institucion_id:CURRENT.institucion,matricula:mat,nombre:nom,nivel:$("#est-nivel").value,grado:$("#est-curso").value.trim()}); }
+    var nuevo={matricula:mat,nombre:nom,nivel:$("#est-nivel").value,curso:$("#est-curso").value.trim(),seccion:"",genero:"",tutor:$("#est-tutor").value.trim(),tel:$("#est-tel").value.trim()};
+    ESTUDIANTES.push(nuevo);
+    if(MODE==="live"&&sbClient){ Promise.resolve(sbClient.from("estudiantes").insert({institucion_id:CURRENT.institucion,codigo:mat,matricula:mat,nombre:nom,nivel:$("#est-nivel").value,grado:$("#est-curso").value.trim(),tutor:nuevo.tutor,telefono:nuevo.tel}).select("id").single()).then(function(r){ if(r&&r.data)nuevo.dbid=r.data.id; else if(r&&r.error)toast("No se guardó en Supabase",r.error.message); }); }
     ["est-mat","est-nom","est-curso","est-tutor","est-tel"].forEach(function(id){$("#"+id).value="";});
     renderEstudiantes(); toast("Estudiante agregado","Se registró "+esc(nom)+".");
   });
@@ -2152,7 +2186,9 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
           var nom=pick(r,["Nombre completo*","Nombre completo","Nombre","nombre"]);
           if(!mat||!nom) return;
           if(ESTUDIANTES.some(function(s){return s.matricula===mat;})) return;
-          ESTUDIANTES.push({matricula:mat,nombre:nom,nivel:pick(r,["Nivel","nivel"]),curso:pick(r,["Curso","Curso / sección","curso"]),seccion:pick(r,["Sección","Seccion"]),genero:pick(r,["Género","Genero"]),tutor:pick(r,["Tutor / Encargado","Tutor / encargado","Tutor"]),tel:pick(r,["Teléfono","Telefono"])});
+          var e={matricula:mat,nombre:nom,nivel:pick(r,["Nivel","nivel"]),curso:pick(r,["Curso","Curso / sección","curso"]),seccion:pick(r,["Sección","Seccion"]),genero:pick(r,["Género","Genero"]),tutor:pick(r,["Tutor / Encargado","Tutor / encargado","Tutor"]),tel:pick(r,["Teléfono","Telefono"])};
+          ESTUDIANTES.push(e);
+          if(MODE==="live"&&sbClient){ sbClient.from("estudiantes").insert({institucion_id:CURRENT.institucion,codigo:mat,matricula:mat,nombre:nom,nivel:e.nivel||null,grado:e.curso,seccion:e.seccion,genero:e.genero,tutor:e.tutor,telefono:e.tel}); }
           added++;
         });
         // ---- Hoja opcional "Historial": crea casos / incidencias por matrícula ----

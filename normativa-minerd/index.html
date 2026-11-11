@@ -1272,12 +1272,20 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   function analizarIA(){
     if(MODE!=="live"||!sbClient){ return toast("La IA requiere conexión","Conecta Supabase y despliega la función «analizar-caso» (incluida en el backend) con tu clave de Gemini o Groq. Mientras tanto se muestra el análisis por reglas. La guía paso a paso explica cómo activarla."); }
     var btn=$("#ia-btn"); if(btn){btn.disabled=true;btn.textContent="Analizando…";}
+    function fin(){ if(btn){btn.disabled=false;btn.textContent="✨ Analizar con IA";} }
+    function err(msg){ fin(); toast("Error de la IA", msg||"No se obtuvo respuesta. Revisa la clave y el modelo en la función «analizar-caso»."); }
     sbClient.functions.invoke("analizar-caso",{body:{nivel:state.nivel,curso:state.curso,descripcion:state.desc}}).then(function(r){
-      var d=r&&r.data, txt=d&&(d.analisis||d.text||d.output)||"";
-      if(txt){ $("#ia-out").innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Análisis con IA</div><p style="white-space:pre-wrap;margin:.4em 0 0;line-height:1.6">'+esc(txt)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</p></div>'; }
-      else { toast("Sin respuesta de la IA","La función respondió sin texto. Revisa la clave y el modelo en la función «analizar-caso»."); }
-      if(btn){btn.disabled=false;btn.textContent="✨ Analizar con IA";}
-    }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent="✨ Analizar con IA";} toast("No se pudo conectar con la IA","Revisa que la función «analizar-caso» esté desplegada y la clave configurada. ("+((e&&e.message)||e)+")"); });
+      var d=r&&r.data;
+      if(r&&r.error){
+        // supabase-js devuelve el error HTTP aquí; intentamos leer el mensaje real de la función
+        if(r.error.context&&typeof r.error.context.json==="function"){ r.error.context.json().then(function(j){ err((j&&j.error)||r.error.message); }).catch(function(){ err(r.error.message); }); }
+        else err(r.error.message); return;
+      }
+      if(d&&d.error){ err(d.error); return; }
+      var txt=d&&(d.analisis||d.text||d.output)||"";
+      if(txt){ $("#ia-out").innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Análisis con IA</div><p style="white-space:pre-wrap;margin:.4em 0 0;line-height:1.6">'+esc(txt)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</p></div>'; fin(); }
+      else err("La función respondió sin texto.");
+    }).catch(function(e){ err(((e&&e.message)||e)); });
   }
   if($("#ia-btn")) $("#ia-btn").addEventListener("click",analizarIA);
   function taller(orden,tit,cat,obj){

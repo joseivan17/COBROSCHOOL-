@@ -746,8 +746,9 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     <div class="card" style="padding:18px;margin-top:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div class="eyebrow">Registros del reporte (<span id="mn-count">0</span>)</div>
-        <button class="btn btn-primary" id="mn-export">⤓ Exportar a Excel (Reporte MINERD)</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" id="mn-ia-btn">✨ Resumen con IA</button><button class="btn btn-primary" id="mn-export">⤓ Exportar a Excel (Reporte MINERD)</button></div>
       </div>
+      <div id="mn-ia" style="margin-top:10px"></div>
       <p style="color:var(--muted);font-size:13px;margin:.3em 0 10px">Incluye los casos de Orientación y las incidencias de Coordinación. El Excel trae: Nombre, grado, nivel, tipo de falta, descripción, medida aplicada, estado del caso (No iniciado / En proceso / Resuelto o logrado), instancia de resolución y observación.</p>
       <div style="overflow-x:auto"><table class="utable"><thead><tr><th>Nombre</th><th>Grado</th><th>Nivel</th><th>Tipo de falta</th><th>Estado</th><th>Instancia</th></tr></thead><tbody id="mn-tbody"></tbody></table></div>
       <p style="color:var(--muted);font-size:12px;margin-top:8px">Vista previa (hasta 50 filas). El Excel completo incluye todas las columnas y filas. Si la descarga no inicia, es porque la vista previa la bloquea; funciona en la versión hospedada.</p>
@@ -785,8 +786,9 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
         <div class="field"><label>Tamaño máximo de grupo</label><select id="g-size"><option>5</option><option>4</option><option>6</option></select></div>
         <div class="field"><label>Ciclo a organizar</label><select id="g-ciclo"><option>Ciclo 1</option><option>Ciclo 2</option><option>Ciclo 3</option></select></div>
       </div>
-      <div class="actions"><button class="btn btn-ghost" data-go="s-menu">← Volver</button><button class="btn btn-primary" id="genGrupos">Agrupar automáticamente →</button></div>
+      <div class="actions" style="flex-wrap:wrap;gap:8px"><button class="btn btn-ghost" data-go="s-menu">← Volver</button><button class="btn btn-ghost" id="grupos-ia-btn">✨ Sugerir agrupación con IA</button><button class="btn btn-primary" id="genGrupos">Agrupar automáticamente →</button></div>
     </div>
+    <div id="grupos-ia" style="margin-top:14px"></div>
     <div id="grupos-result" hidden></div>
     <div id="cierre-result" hidden></div>
   </section>
@@ -1159,6 +1161,17 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     toast("Reporte MINERD","Se generó el Excel con "+mnRows().length+" registros. Si la descarga no inicia, es porque la vista previa la bloquea; funciona en la versión hospedada.");
   }
   if($("#mn-export")) $("#mn-export").addEventListener("click",exportMinerd);
+  if($("#mn-ia-btn")) $("#mn-ia-btn").addEventListener("click",function(){
+    var rows=mnRows();
+    if(!rows.length) return toast("Sin datos","No hay casos ni incidencias para resumir todavía.");
+    // Datos AGREGADOS, sin nombres
+    function conteo(idx){ var m={}; rows.forEach(function(r){ var k=r[idx]||"(sin dato)"; m[k]=(m[k]||0)+1; }); return Object.keys(m).map(function(k){return k+": "+m[k];}).join(" · "); }
+    var resumen="Total de registros: "+rows.length+" ("+CASOS.length+" casos de Orientación, "+INCID.length+" incidencias).\n"+
+      "Por estado: "+conteo(6)+".\n"+
+      "Por tipo de falta: "+conteo(3)+".\n"+
+      "Por instancia de resolución: "+conteo(7)+".";
+    invocarIA("generar-informes", { resumen:resumen, periodo:"actual" }, "#mn-ia", this, "✨ Resumen con IA");
+  });
 
   // Usuarios y roles
   var ROLES=["director","orientador","coordinador","docente","admin"];
@@ -1322,6 +1335,23 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     }).catch(function(e){ err(((e&&e.message)||e)); });
   }
   if($("#ia-btn")) $("#ia-btn").addEventListener("click",analizarIA);
+  // Ayudante genérico para llamar funciones de IA (grupos, informes…)
+  function invocarIA(fn, body, outSel, btn, labelBase){
+    if(MODE!=="live"||!sbClient){ return toast("Esta función usa IA","Conéctate a Supabase y despliega la función «"+fn+"» con tu clave (Gemini o Groq)."); }
+    var out=$(outSel);
+    if(btn){ btn.disabled=true; btn.textContent="Generando…"; }
+    if(out) out.innerHTML='<div class="card" style="padding:16px"><p style="color:var(--muted);margin:0">Generando con IA…</p></div>';
+    function fin(){ if(btn){btn.disabled=false; btn.textContent=labelBase;} }
+    function err(m){ fin(); m=m||"No se obtuvo respuesta."; if(out)out.innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--danger)"><div class="eyebrow" style="color:var(--danger)">No se pudo generar con IA</div><p style="margin:.4em 0 0">'+esc(m)+'</p></div>'; toast("Error de la IA",m); }
+    sbClient.functions.invoke(fn,{body:body}).then(function(r){
+      var d=r&&r.data;
+      if(r&&r.error){ if(r.error.context&&typeof r.error.context.json==="function"){ r.error.context.json().then(function(j){err((j&&j.error)||r.error.message);}).catch(function(){err(r.error.message);}); } else err(r.error.message); return; }
+      if(d&&d.error){ err(d.error); return; }
+      var txt=d&&(d.texto||d.informe||d.analisis||d.text)||"";
+      if(txt){ if(out)out.innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Generado con IA</div><p style="white-space:pre-wrap;margin:.4em 0 0;line-height:1.6">'+esc(txt)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Generado por IA con datos agregados (sin nombres). Revisar con criterio profesional.</p></div>'; fin(); }
+      else err("La función respondió sin texto.");
+    }).catch(function(e){ err((e&&e.message)||e); });
+  }
   function taller(orden,tit,cat,obj){
     return '<div class="taller"><span class="tag">'+orden+' sugerido</span>'+
       '<h3 style="margin:.4em 0 .1em;font-size:17px">'+tit+'</h3>'+
@@ -1436,6 +1466,11 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     renderGruposHome(); toast("Caso agregado","Se clasificó como: "+cat+".");
   });
   document.addEventListener("click",function(e){ var d=e.target.closest(".gr-del"); if(d){ var gid=d.getAttribute("data-gid"); GRUPO_CASOS=GRUPO_CASOS.filter(function(x){return x.gid!==gid;}); renderGruposHome(); } });
+  if($("#grupos-ia-btn")) $("#grupos-ia-btn").addEventListener("click",function(){
+    if(!GRUPO_CASOS.length) return toast("Sin casos","Agrega casos al grupo de apoyo antes de pedir la sugerencia.");
+    var casos=GRUPO_CASOS.map(function(g,i){ return { ref:i+1, curso:g.curso||"", categoria:g.cat||"", descripcion:g.desc||""}; });
+    invocarIA("agrupar-grupos", { casos:casos, tamano:(+($("#g-size").value||5)) }, "#grupos-ia", this, "✨ Sugerir agrupación con IA");
+  });
   if($("#genGrupos")) $("#genGrupos").addEventListener("click",function(){
     if(!GRUPO_CASOS.length) return toast("Sin casos","Agrega casos al grupo de apoyo antes de agrupar.");
     var size=+$("#g-size").value||5, ciclo=$("#g-ciclo").value;

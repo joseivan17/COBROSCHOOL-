@@ -718,7 +718,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     <div class="screenhead"><div class="eyebrow" style="color:#e7d7f2">Resultado · Orientación</div><h1>Análisis psicoeducativo</h1><p>Análisis, protocolos y talleres sugeridos.</p></div>
     <div style="margin-top:14px" class="notice warn"><b>⚠ Revisa el Manual de Convivencia antes de aplicar.</b> Estas sugerencias son de carácter general. Antes de aplicar cualquier medida, protocolo o derivación, revisa el Manual de Convivencia del centro y la normativa vigente del MINERD.</div>
     <div style="margin:12px 0 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <span class="badge-demo">Resultado de ejemplo — versión demostrativa</span>
+      <span class="badge-demo" id="demo-badge">Resultado de ejemplo — versión demostrativa</span>
       <button class="btn btn-primary" id="ia-btn" style="padding:8px 14px;font-size:14px">✨ Analizar con IA</button>
     </div>
     <div id="ia-out" style="margin-top:12px"></div>
@@ -1220,7 +1220,23 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   function esc(s){return (s||"").replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
 
   // Build result (representative example, echoes nivel/curso)
-  $("#toResult").addEventListener("click",function(){renderResult();show("s-result");});
+  $("#toResult").addEventListener("click",mostrarResultado);
+  function mostrarResultado(){
+    show("s-result");
+    var conectado = (MODE==="live" && sbClient);
+    if($("#demo-badge")) $("#demo-badge").style.display = conectado ? "none" : "inline-block";
+    if($("#ia-btn")) $("#ia-btn").textContent = conectado ? "↻ Regenerar con IA" : "✨ Analizar con IA";
+    if(conectado){
+      // Modo conectado: el resultado es el análisis REAL de la IA (no la plantilla de ejemplo).
+      $("#result-body").innerHTML="";
+      $("#ia-out").innerHTML='<div class="card" style="padding:16px"><div class="eyebrow">✨ Análisis con IA</div><p style="color:var(--muted);margin:.4em 0 0">Generando análisis a partir de la descripción…</p></div>';
+      analizarIA();
+    } else {
+      // Modo demostración: plantilla de ejemplo, claramente marcada.
+      $("#ia-out").innerHTML="";
+      renderResult();
+    }
+  }
   function crit(name,val,txt){var si=val==="SÍ";return '<div class="critcard '+(si?'si':'')+'"><b>'+name+':</b> <span class="v '+(si?'si':'no')+'">'+(si?'✓ SÍ':'✗ NO')+'</span><p>'+txt+'</p></div>';}
   function acc(cls,title,inner,open){return '<div class="acc '+cls+'" data-open="'+(open?'true':'false')+'"><button onclick="this.parentNode.setAttribute(\'data-open\', this.parentNode.getAttribute(\'data-open\')===\'true\'?\'false\':\'true\')">'+title+'<span class="chev">▾</span></button><div class="body">'+inner+'</div></div>';}
   function renderResult(){
@@ -1272,8 +1288,8 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   function analizarIA(){
     if(MODE!=="live"||!sbClient){ return toast("La IA requiere conexión","Conecta Supabase y despliega la función «analizar-caso» (incluida en el backend) con tu clave de Gemini o Groq. Mientras tanto se muestra el análisis por reglas. La guía paso a paso explica cómo activarla."); }
     var btn=$("#ia-btn"); if(btn){btn.disabled=true;btn.textContent="Analizando…";}
-    function fin(){ if(btn){btn.disabled=false;btn.textContent="✨ Analizar con IA";} }
-    function err(msg){ fin(); toast("Error de la IA", msg||"No se obtuvo respuesta. Revisa la clave y el modelo en la función «analizar-caso»."); }
+    function fin(){ if(btn){btn.disabled=false;btn.textContent="↻ Regenerar con IA";} }
+    function err(msg){ fin(); msg=msg||"No se obtuvo respuesta. Revisa la clave y el modelo en la función «analizar-caso»."; if($("#ia-out"))$("#ia-out").innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--danger)"><div class="eyebrow" style="color:var(--danger)">No se pudo generar el análisis con IA</div><p style="margin:.4em 0 0">'+esc(msg)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Revisa la función «analizar-caso» y la clave. Puedes volver a intentar con «↻ Regenerar con IA».</p></div>'; toast("Error de la IA", msg); }
     sbClient.functions.invoke("analizar-caso",{body:{nivel:state.nivel,curso:state.curso,descripcion:state.desc}}).then(function(r){
       var d=r&&r.data;
       if(r&&r.error){
@@ -1435,7 +1451,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
 
   // ¿Qué resultado está visible para exportar?
   function exportTarget(){
-    if(!$("#s-result").hidden) return {n:"Analisis_de_caso",el:$("#result-body")};
+    if(!$("#s-result").hidden){ var ia=$("#ia-out"); if(ia && ia.textContent.trim().length>40) return {n:"Analisis_de_caso",el:ia}; return {n:"Analisis_de_caso",el:$("#result-body")}; }
     if(!$("#s-planes").hidden && $("#plan-result") && !$("#plan-result").hidden) return {n:"Plan_de_trabajo",el:$("#plan-result")};
     if(!$("#s-grupos").hidden){
       if($("#cierre-result") && !$("#cierre-result").hidden) return {n:"Informes_de_cierre",el:$("#cierre-result")};

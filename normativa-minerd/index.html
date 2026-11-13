@@ -918,8 +918,15 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
   function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
 
+  // ====== CONEXIÓN FIJA ======
+  // Pega aquí la URL del proyecto y tu clave pública (anon / publishable) para que
+  // TODOS entren ya conectados en cualquier equipo, sin configurar nada.
+  // La clave pública es SEGURA en el cliente. Déjalas vacías para configurar por dispositivo.
+  var DEFAULT_SB_URL = "https://wwlqamosfhxujvqwlyew.supabase.co";
+  var DEFAULT_SB_KEY = "sb_publishable_hAOundHo3YLKKh225fBA_g_b9ew_3JC";
+  // ===========================
   function initSupabase(){
-    var url=lsGet("sb_url"), key=lsGet("sb_key");
+    var url=lsGet("sb_url")||DEFAULT_SB_URL, key=lsGet("sb_key")||DEFAULT_SB_KEY;
     sbClient=null;
     if(url&&key&&window.supabase){ try{ sbClient=window.supabase.createClient(url,key); }catch(e){ sbClient=null; } }
     updConnState();
@@ -1249,6 +1256,24 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
   });
   function cell(l,v){return '<div class="field"><label>'+l+'</label><div class="readonly">'+esc(v)+'</div></div>';}
   function esc(s){return (s||"").replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+  // Convierte el markdown que devuelve la IA (**negritas**, * viñetas, ## títulos) en HTML legible.
+  function mdInline(s){ return s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/(^|[^\*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>').replace(/`([^`]+)`/g,'<code style="background:var(--panel);padding:1px 5px;border-radius:5px;font-size:.92em">$1</code>'); }
+  function mdToHtml(t){
+    t=esc(t||""); var lines=t.split(/\r?\n/), html="", ul=false, ol=false;
+    function closeL(){ if(ul){html+="</ul>";ul=false;} if(ol){html+="</ol>";ol=false;} }
+    lines.forEach(function(raw){
+      var l=raw.replace(/\s+$/,""), tl=l.trim();
+      var h=tl.match(/^(#{1,4})\s+(.*)/);
+      if(h){ closeL(); html+='<div class="eyebrow" style="margin:14px 0 4px;color:var(--pri)">'+mdInline(h[2])+'</div>'; return; }
+      var b=tl.match(/^[\*\-•]\s+(.*)/);
+      if(b){ if(ol){html+="</ol>";ol=false;} if(!ul){html+='<ul style="margin:.2em 0 .5em 1.1em;padding:0">';ul=true;} html+='<li style="margin:.25em 0">'+mdInline(b[1])+'</li>'; return; }
+      var n=tl.match(/^\d+[\.\)]\s+(.*)/);
+      if(n){ if(ul){html+="</ul>";ul=false;} if(!ol){html+='<ol style="margin:.2em 0 .5em 1.3em;padding:0">';ol=true;} html+='<li style="margin:.25em 0">'+mdInline(n[1])+'</li>'; return; }
+      if(!tl){ closeL(); return; }
+      closeL(); html+='<p style="margin:.45em 0;line-height:1.6">'+mdInline(tl)+'</p>';
+    });
+    closeL(); return html;
+  }
 
   // Build result (representative example, echoes nivel/curso)
   $("#toResult").addEventListener("click",mostrarResultado);
@@ -1330,7 +1355,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
       }
       if(d&&d.error){ err(d.error); return; }
       var txt=d&&(d.analisis||d.text||d.output)||"";
-      if(txt){ $("#ia-out").innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Análisis con IA</div><p style="white-space:pre-wrap;margin:.4em 0 0;line-height:1.6">'+esc(txt)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</p></div>'; fin(); }
+      if(txt){ $("#ia-out").innerHTML='<div class="card" style="padding:18px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Análisis con IA</div><div style="margin-top:.3em">'+mdToHtml(txt)+'</div><p style="color:var(--muted);font-size:12px;margin:.8em 0 0;padding-top:.6em;border-top:1px solid var(--line)">Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</p></div>'; fin(); }
       else err("La función respondió sin texto.");
     }).catch(function(e){ err(((e&&e.message)||e)); });
   }
@@ -1348,7 +1373,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
       if(r&&r.error){ if(r.error.context&&typeof r.error.context.json==="function"){ r.error.context.json().then(function(j){err((j&&j.error)||r.error.message);}).catch(function(){err(r.error.message);}); } else err(r.error.message); return; }
       if(d&&d.error){ err(d.error); return; }
       var txt=d&&(d.texto||d.informe||d.analisis||d.text)||"";
-      if(txt){ if(out)out.innerHTML='<div class="card" style="padding:16px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Generado con IA</div><p style="white-space:pre-wrap;margin:.4em 0 0;line-height:1.6">'+esc(txt)+'</p><p style="color:var(--muted);font-size:12px;margin:.6em 0 0">Generado por IA con datos agregados (sin nombres). Revisar con criterio profesional.</p></div>'; fin(); }
+      if(txt){ if(out)out.innerHTML='<div class="card" style="padding:18px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Generado con IA</div><div style="margin-top:.3em">'+mdToHtml(txt)+'</div><p style="color:var(--muted);font-size:12px;margin:.8em 0 0;padding-top:.6em;border-top:1px solid var(--line)">Generado por IA con datos agregados (sin nombres). Revisar con criterio profesional.</p></div>'; fin(); }
       else err("La función respondió sin texto.");
     }).catch(function(e){ err((e&&e.message)||e); });
   }

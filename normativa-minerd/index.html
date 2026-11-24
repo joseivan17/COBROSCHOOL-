@@ -251,6 +251,24 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
 .iconbtn:active{transform:translateY(1px)}
 #bellBadge{animation:pop .3s ease}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+/* ===== Tarjeta de respuesta de la IA (bonita) ===== */
+.ia-card{border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(74,35,90,.12);background:var(--surface);animation:pop .3s ease both}
+.ia-head{background:var(--grad);color:#fff;padding:13px 20px;font-weight:800;display:flex;align-items:center;gap:9px;font-size:15px;letter-spacing:.01em}
+.ia-head .sp{width:26px;height:26px;border-radius:9px;background:rgba(255,255,255,.2);display:inline-flex;align-items:center;justify-content:center;font-size:15px}
+.ia-body{padding:16px 20px;font-size:14.5px}
+.ia-body h4.ia-h{margin:16px 0 7px;font-size:14px;color:var(--pri);font-weight:800;display:flex;align-items:center;gap:9px;line-height:1.3}
+.ia-body h4.ia-h::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--pri-3);flex:0 0 auto}
+.ia-body h4.ia-h:first-child{margin-top:2px}
+.ia-body p{margin:.5em 0;line-height:1.7;color:var(--text)}
+.ia-body ul{list-style:none;margin:.4em 0 .7em;padding:0}
+.ia-body ul li{position:relative;padding-left:22px;margin:.35em 0;line-height:1.6}
+.ia-body ul li::before{content:"▸";position:absolute;left:3px;top:0;color:var(--pri-3);font-weight:800}
+.ia-body ol{margin:.4em 0 .7em;padding-left:1.3em}
+.ia-body ol li{margin:.35em 0;line-height:1.6}
+.ia-body ol li::marker{color:var(--pri-3);font-weight:800}
+.ia-body strong{color:var(--pri);font-weight:800}
+:root[data-theme="dark"] .ia-body strong,:root:not([data-theme="light"]) .ia-body strong{color:#D9B7EE}
+.ia-foot{padding:11px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;background:var(--panel);display:flex;align-items:center;gap:7px}
 </style>
 
 <div class="appbar">
@@ -1264,7 +1282,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
     lines.forEach(function(raw){
       var l=raw.replace(/\s+$/,""), tl=l.trim();
       var h=tl.match(/^(#{1,4})\s+(.*)/);
-      if(h){ closeL(); html+='<div class="eyebrow" style="margin:14px 0 4px;color:var(--pri)">'+mdInline(h[2])+'</div>'; return; }
+      if(h){ closeL(); html+='<h4 class="ia-h">'+mdInline(h[2])+'</h4>'; return; }
       var b=tl.match(/^[\*\-•]\s+(.*)/);
       if(b){ if(ol){html+="</ol>";ol=false;} if(!ul){html+='<ul style="margin:.2em 0 .5em 1.1em;padding:0">';ul=true;} html+='<li style="margin:.25em 0">'+mdInline(b[1])+'</li>'; return; }
       var n=tl.match(/^\d+[\.\)]\s+(.*)/);
@@ -1355,7 +1373,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
       }
       if(d&&d.error){ err(d.error); return; }
       var txt=d&&(d.analisis||d.text||d.output)||"";
-      if(txt){ $("#ia-out").innerHTML='<div class="card" style="padding:18px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Análisis con IA</div><div style="margin-top:.3em">'+mdToHtml(txt)+'</div><p style="color:var(--muted);font-size:12px;margin:.8em 0 0;padding-top:.6em;border-top:1px solid var(--line)">Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</p></div>'; fin(); }
+      if(txt){ $("#ia-out").innerHTML='<div class="ia-card"><div class="ia-head"><span class="sp">✨</span> Análisis con IA</div><div class="ia-body">'+mdToHtml(txt)+'</div><div class="ia-foot">🔒 Generado por IA a partir de la descripción (sin datos personales). Revisar con criterio profesional.</div></div>'; fin(); }
       else err("La función respondió sin texto.");
     }).catch(function(e){ err(((e&&e.message)||e)); });
   }
@@ -1373,7 +1391,7 @@ body.no-nav #sidebar,body.no-nav #menuBtn{display:none}
       if(r&&r.error){ if(r.error.context&&typeof r.error.context.json==="function"){ r.error.context.json().then(function(j){err((j&&j.error)||r.error.message);}).catch(function(){err(r.error.message);}); } else err(r.error.message); return; }
       if(d&&d.error){ err(d.error); return; }
       var txt=d&&(d.texto||d.informe||d.analisis||d.text)||"";
-      if(txt){ if(out)out.innerHTML='<div class="card" style="padding:18px;border-left:4px solid var(--pri-3)"><div class="eyebrow">✨ Generado con IA</div><div style="margin-top:.3em">'+mdToHtml(txt)+'</div><p style="color:var(--muted);font-size:12px;margin:.8em 0 0;padding-top:.6em;border-top:1px solid var(--line)">Generado por IA con datos agregados (sin nombres). Revisar con criterio profesional.</p></div>'; fin(); }
+      if(txt){ if(out)out.innerHTML='<div class="ia-card"><div class="ia-head"><span class="sp">✨</span> Generado con IA</div><div class="ia-body">'+mdToHtml(txt)+'</div><div class="ia-foot">🔒 Generado por IA con datos agregados (sin nombres). Revisar con criterio profesional.</div></div>'; fin(); }
       else err("La función respondió sin texto.");
     }).catch(function(e){ err((e&&e.message)||e); });
   }
